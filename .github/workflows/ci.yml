@@ -20,7 +20,10 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        # package-lock.json is generated on macOS and omits Linux-specific
+        # optional deps (e.g. @rollup/rollup-linux-x64-gnu).  Removing it
+        # lets npm resolve platform packages correctly on the CI runner.
+        run: rm -f package-lock.json && npm install
 
       - name: Typecheck & build client
         run: npm run build --workspace=client
