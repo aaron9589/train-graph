@@ -1,0 +1,16 @@
+services:
+  train-graph:
+    build: .
+    image: train-graph:latest
+    container_name: train-graph
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - train-graph-data:/app/server/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+
+volumes:
+  train-graph-data:
