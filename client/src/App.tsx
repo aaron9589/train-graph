@@ -31,6 +31,19 @@ export default function App() {
   useEffect(() => { setHistoryPast([]); setHistoryFuture([]); }, [selectedId]);
   useEffect(() => { setZoomLevel(1); setViewOffset(0); }, [selectedId]);
 
+  // ── Train visibility ──────────────────────────────────
+  const [hiddenTrainIds, setHiddenTrainIds] = useState<Set<string>>(new Set());
+  useEffect(() => { setHiddenTrainIds(new Set()); }, [selectedId]);
+
+  function handleToggleTrainVisibility(trainId: string) {
+    setHiddenTrainIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(trainId)) next.delete(trainId);
+      else next.add(trainId);
+      return next;
+    });
+  }
+
   // ── Zoom / pan / settings UI ───────────────────────────
   const [zoomLevel, setZoomLevel] = useState(1);
   const [viewOffset, setViewOffset] = useState(0);
@@ -107,14 +120,16 @@ export default function App() {
 
   const displayTimetable = useMemo<Timetable | null>(() => {
     if (!timetable) return null;
-    if (!draftTrain) return timetable;
-    const idx = timetable.trains.findIndex((t) => t.id === draftTrain.id);
-    const trains =
-      idx >= 0
-        ? timetable.trains.map((t, i) => (i === idx ? draftTrain : t))
-        : [...timetable.trains, draftTrain];
+    let trains = timetable.trains;
+    if (draftTrain) {
+      const idx = trains.findIndex((t) => t.id === draftTrain.id);
+      trains = idx >= 0
+        ? trains.map((t, i) => (i === idx ? draftTrain : t))
+        : [...trains, draftTrain];
+    }
+    trains = trains.filter((t) => !hiddenTrainIds.has(t.id));
     return { ...timetable, trains };
-  }, [timetable, draftTrain]);
+  }, [timetable, draftTrain, hiddenTrainIds]);
 
   // ── Timetable CRUD ───────────────────────────────────────────
 
@@ -320,6 +335,8 @@ export default function App() {
         onNewTrain={() => setModal({ type: 'newTrain' })}
         onEditTrain={(train: Train) => setModal({ type: 'editTrain', train })}
         onDeleteTrain={handleDeleteTrain}
+        hiddenTrainIds={hiddenTrainIds}
+        onToggleTrainVisibility={handleToggleTrainVisibility}
       />
 
       {/* ── MAIN GRAPH AREA ── */}
@@ -453,6 +470,7 @@ export default function App() {
           train={modal.type === 'editTrain' ? modal.train : undefined}
           stations={timetable.stations}
           paths={timetable.paths}
+          existingColors={timetable.trains.map((t) => t.color)}
           onDraftChange={setDraftTrain}
           onSave={handleSaveTrain}
           onDelete={modal.type === 'editTrain' ? () => handleDeleteTrain(modal.train.id) : undefined}

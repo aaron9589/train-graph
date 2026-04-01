@@ -23,6 +23,8 @@ interface Props {
   onNewTrain: () => void;
   onEditTrain: (train: Train) => void;
   onDeleteTrain: (trainId: string) => void;
+  hiddenTrainIds: Set<string>;
+  onToggleTrainVisibility: (trainId: string) => void;
 }
 
 export function Sidebar({
@@ -45,6 +47,8 @@ export function Sidebar({
   onNewTrain,
   onEditTrain,
   onDeleteTrain,
+  hiddenTrainIds,
+  onToggleTrainVisibility,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [openSections, setOpenSections] = useLocalStorage('tg:openSections', { trains: true, stations: true, paths: false });
@@ -169,7 +173,9 @@ export function Sidebar({
                   <p className="text-xs text-slate-600 py-1">No trains yet</p>
                 )}
                 <div className="space-y-1">
-                  {timetable.trains.map((train) => (
+                  {sortTrains(timetable.trains).map((train) => {
+                    const hidden = hiddenTrainIds.has(train.id);
+                    return (
                     <div
                       key={train.id}
                       className="group flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-slate-800 cursor-pointer transition-colors"
@@ -177,9 +183,16 @@ export function Sidebar({
                     >
                       <span
                         className="w-3 h-3 rounded-full shrink-0 ring-1 ring-black/20"
-                        style={{ background: train.color }}
+                        style={{ background: train.color, opacity: hidden ? 0.35 : 1 }}
                       />
-                      <span className="flex-1 text-sm text-slate-300 truncate">{train.name}</span>
+                      <span className={`flex-1 text-sm truncate ${hidden ? 'text-slate-600' : 'text-slate-300'}`}>{train.name}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onToggleTrainVisibility(train.id); }}
+                        title={hidden ? 'Show on graph' : 'Hide from graph'}
+                        className="p-1 text-slate-600 hover:text-slate-300 rounded shrink-0 transition-colors"
+                      >
+                        {hidden ? <EyeOffIcon /> : <EyeIcon />}
+                      </button>
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={(e) => { e.stopPropagation(); onEditTrain(train); }}
@@ -195,7 +208,8 @@ export function Sidebar({
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -312,6 +326,25 @@ export function Sidebar({
   );
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function trainStartMinute(train: Train): number {
+  let earliest = Infinity;
+  for (const s of train.stops) {
+    const t = s.arrival ?? s.departure;
+    if (t) {
+      const [h, m] = t.split(':').map(Number);
+      const min = h * 60 + m;
+      if (min < earliest) earliest = min;
+    }
+  }
+  return earliest === Infinity ? 0 : earliest;
+}
+
+function sortTrains(trains: Train[]): Train[] {
+  return [...trains].sort((a, b) => trainStartMinute(a) - trainStartMinute(b));
+}
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
 function Chevron({ open }: { open: boolean }) {
@@ -367,6 +400,25 @@ function TrashIcon() {
       <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
       <path d="M10 11v6M14 11v6" />
       <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+      <line x1="1" y1="1" x2="23" y2="23" />
     </svg>
   );
 }

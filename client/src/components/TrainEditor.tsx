@@ -14,6 +14,7 @@ interface Props {
   train?: Train;
   stations: Station[];
   paths: Path[];
+  existingColors?: string[];
   onDraftChange: (draft: Train) => void;
   onSave: (data: TrainRequest) => void;
   onDelete?: () => void;
@@ -26,13 +27,19 @@ const PRESET_COLORS = [
   '#84cc16', '#fb923c',
 ];
 
-export function TrainEditor({ train, stations, paths, onDraftChange, onSave, onDelete, onClose }: Props) {
+export function TrainEditor({ train, stations, paths, existingColors, onDraftChange, onSave, onDelete, onClose }: Props) {
   const sorted = [...stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
   // Keep original stops around so we can restore all-stations view if path is deselected
   const trainStopsRef = useRef(train?.stops);
 
   const [name, setName] = useState(train?.name ?? '');
-  const [color, setColor] = useState(train?.color ?? PRESET_COLORS[0]);
+  const [color, setColor] = useState(() => {
+    if (train?.color) return train.color;
+    const used = existingColors ?? [];
+    const unused = PRESET_COLORS.filter((c) => !used.includes(c));
+    const pool = unused.length > 0 ? unused : PRESET_COLORS;
+    return pool[Math.floor(Math.random() * pool.length)];
+  });
   const [notes, setNotes] = useState(train?.notes ?? '');
   const [stops, setStops] = useState<StopForm[]>(() => buildStopForms(sorted, train?.stops));
   const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
@@ -100,9 +107,12 @@ export function TrainEditor({ train, stations, paths, onDraftChange, onSave, onD
         }
       }
 
-      // Cascade downstream whenever departure effectively changed
+      // Cascade in the direction of travel whenever departure effectively changed
       if (next[idx].departure) {
-        next = cascadeFrom(idx, next, pathStops, prev);
+        // Paths are already stored in travel order → always forward.
+        // For free-form stops (graph_pos order) detect direction from times.
+        const direction = pathStops ? 'down' : detectDirection(next);
+        next = cascadeFrom(idx, next, pathStops, prev, direction);
       }
 
       return next;
@@ -470,32 +480,45 @@ function buildStopForms(stations: Station[], existingStops?: TrainStop[]): StopF
   });
 }
 
-function cascadeFrom(fromIdx: number, stops: StopForm[], pathStops: PathStop[] | null, original: StopForm[]): StopForm[] {
+function cascadeFrom(
+  fromIdx: number,
+  stops: StopForm[],
+  pathStops: PathStop[] | null,
+  original: StopForm[],
+  direction: 'down' | 'up' = 'down',
+): StopForm[] {
   const next = [...stops];
   let prevDep = next[fromIdx].departure;
   if (!prevDep) return next;
 
-  // For non-path cascade, track the original departure of the last processed stop
-  // so we can infer travel time as: original_arrival[i] - original_departure[prev]
   let prevOrigDep = original[fromIdx].departure;
 
-  for (let i = fromIdx + 1; i < next.length; i++) {
+  const indices =
+    direction === 'down'
+      ? Array.from({ length: next.length - fromIdx - 1 }, (_, k) => fromIdx + 1 + k)
+      : Array.from({ length: fromIdx }, (_, k) => fromIdx - 1 - k);
+
+  for (const i of indices) {
     // Skip stops that were blank — don't fill them in
     if (!original[i].arrival && !original[i].departure) continue;
 
     let travelMins: number;
     if (pathStops) {
+      // Path stops are in travel order; travel_time_from_prev is always
+      // relative to the previous entry in sort_order (i.e. direction === 'down').
       const ps = pathStops[i];
       travelMins = ps ? (ps.travel_time_from_prev ?? 0) : 0;
     } else {
-      // Infer travel time from the gap in the original schedule
+      // Infer travel time from the original schedule gap:
+      //   arrival at next-in-travel stop − departure from previous-in-travel stop
+      // This is positive for both up and down directions as long as times are
+      // monotonically increasing along the direction of travel.
       if (!prevOrigDep || !original[i].arrival) break;
       travelMins = diffMinutes(prevOrigDep, original[i].arrival);
       if (travelMins < 0) travelMins = 0;
     }
 
     const arrival = addMinutes(prevDep, travelMins);
-    // Use dwell from form if set, otherwise preserve original dwell gap
     const origDwell =
       original[i].arrival && original[i].departure
         ? diffMinutes(original[i].arrival, original[i].departure)
@@ -508,6 +531,24 @@ function cascadeFrom(fromIdx: number, stops: StopForm[], pathStops: PathStop[] |
     prevOrigDep = original[i].departure;
   }
   return next;
+}
+
+function timeToMin(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+// Determine whether a train travels down (times increase with array index) or
+// up (times decrease with array index) by comparing the first and last timed stops.
+function detectDirection(stops: StopForm[]): 'down' | 'up' {
+  const timed = stops
+    .map((s, i) => ({
+      i,
+      min: s.departure ? timeToMin(s.departure) : s.arrival ? timeToMin(s.arrival) : -1,
+    }))
+    .filter((s) => s.min >= 0);
+  if (timed.length < 2) return 'down';
+  return timed[0].min <= timed[timed.length - 1].min ? 'down' : 'up';
 }
 
 function diffMinutes(from: string, to: string): number {
