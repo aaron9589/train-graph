@@ -5,9 +5,22 @@ const { readDB, writeDB, getTimetable, mutateTimetable, uuidv4 } = require('./db
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
+// Optional sub-path prefix, e.g. BASE_PATH=/traingraph
+// Strips the prefix from incoming URLs before any routing so the same
+// image works whether the reverse proxy rewrites the path or not.
+const BASE_PATH = (process.env.BASE_PATH || '').replace(/\/+$/, '');
 
 app.use(cors());
 app.use(express.json());
+
+if (BASE_PATH) {
+  app.use((req, _res, next) => {
+    if (req.url.startsWith(BASE_PATH + '/') || req.url === BASE_PATH) {
+      req.url = req.url.slice(BASE_PATH.length) || '/';
+    }
+    next();
+  });
+}
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/dist')));

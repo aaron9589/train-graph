@@ -11,6 +11,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
+      # Set BASE_PATH if serving under a sub-path e.g. /traingraph
+      # Leave unset (or empty) for root / subdomain deployments
+      # - BASE_PATH=/traingraph
 
 volumes:
   train-graph-data:
