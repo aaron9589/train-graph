@@ -25,6 +25,8 @@ interface Props {
   onDeleteTrain: (trainId: string) => void;
   hiddenTrainIds: Set<string>;
   onToggleTrainVisibility: (trainId: string) => void;
+  onExportTimetable: () => void;
+  onImportTimetable: (file: File) => void;
 }
 
 export function Sidebar({
@@ -49,6 +51,8 @@ export function Sidebar({
   onDeleteTrain,
   hiddenTrainIds,
   onToggleTrainVisibility,
+  onExportTimetable,
+  onImportTimetable,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [openSections, setOpenSections] = useLocalStorage('tg:openSections', { trains: true, stations: true, paths: false });
@@ -93,12 +97,29 @@ export function Sidebar({
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Timetables
           </span>
-          <button
-            onClick={onNewTimetable}
-            className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
-          >
-            + New
-          </button>
+          <div className="flex items-center gap-1">
+            <label
+              title="Import timetable from JSON"
+              className="cursor-pointer p-1 text-slate-500 hover:text-slate-300 rounded transition-colors"
+            >
+              <input
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) { onImportTimetable(f); e.target.value = ''; }
+                }}
+              />
+              <UploadIcon />
+            </label>
+            <button
+              onClick={onNewTimetable}
+              className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+            >
+              + New
+            </button>
+          </div>
         </div>
 
         {/* Timetable list */}
@@ -119,6 +140,13 @@ export function Sidebar({
               <span className="flex-1 text-sm font-medium truncate">{tt.name}</span>
               {tt.id === selectedId && (
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onExportTimetable(); }}
+                    title="Export timetable as JSON"
+                    className="p-1 text-slate-400 hover:text-slate-200 rounded"
+                  >
+                    <DownloadIcon />
+                  </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onDuplicateTimetable(tt.id); }}
                     title="Duplicate timetable"
@@ -427,6 +455,26 @@ function RouteIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="6" cy="19" r="3" /><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" /><circle cx="18" cy="5" r="3" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
     </svg>
   );
 }

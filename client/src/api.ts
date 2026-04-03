@@ -58,6 +58,12 @@ export const api = {
   duplicateTimetable: (id: string) =>
     req<Timetable>(`/timetables/${id}/duplicate`, { method: 'POST' }),
 
+  importTimetable: (data: unknown) =>
+    req<Timetable>('/timetables/import', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   restoreTimetable: (id: string, data: { stations: unknown[]; trains: unknown[]; paths: unknown[] }) =>
     req<Timetable>(`/timetables/${id}/restore`, {
       method: 'POST',

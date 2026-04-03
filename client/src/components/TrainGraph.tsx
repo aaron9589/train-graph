@@ -67,7 +67,11 @@ function GraphTooltip({ data }: { data: TooltipData }) {
   return (
     <div
       className="pointer-events-none fixed z-50 rounded-xl border border-slate-700 bg-slate-900/95 backdrop-blur-sm shadow-2xl px-4 py-3 text-sm min-w-[180px]"
-      style={{ left: data.screenX + 14, top: data.screenY - 20 }}
+      style={{
+        left: data.screenX > window.innerWidth - 220 ? undefined : data.screenX + 14,
+        right: data.screenX > window.innerWidth - 220 ? window.innerWidth - data.screenX + 14 : undefined,
+        top: data.screenY - 20,
+      }}
     >
       <div className="flex items-center gap-2 mb-2">
         <span

@@ -82,6 +82,53 @@ app.delete('/api/timetables/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Must be defined before /:id routes to avoid 'import' being matched as an id
+app.post('/api/timetables/import', (req, res) => {
+  const data = req.body;
+  if (!data || !data.name) return res.status(400).json({ error: 'Invalid timetable data: name is required' });
+  const db = readDB();
+  const now = new Date().toISOString();
+  const newId = uuidv4();
+  const stationIdMap = {};
+  (data.stations || []).forEach((s) => { stationIdMap[s.id] = uuidv4(); });
+  const pathIdMap = {};
+  (data.paths || []).forEach((p) => { pathIdMap[p.id] = uuidv4(); });
+  const imported = {
+    id: newId,
+    name: data.name,
+    description: data.description || '',
+    start_time: data.start_time || '06:00',
+    end_time: data.end_time || '22:00',
+    created_at: now,
+    updated_at: now,
+    settings: data.settings || { ...DEFAULT_SETTINGS },
+    stations: (data.stations || []).map((s) => ({ ...s, id: stationIdMap[s.id], timetable_id: newId })),
+    trains: (data.trains || []).map((tr) => {
+      const trainId = uuidv4();
+      return {
+        ...tr, id: trainId, timetable_id: newId,
+        stops: (tr.stops || []).map((stop) => ({
+          ...stop, id: uuidv4(), train_id: trainId,
+          station_id: stationIdMap[stop.station_id] || stop.station_id,
+        })),
+      };
+    }),
+    paths: (data.paths || []).map((p) => {
+      const pathId = pathIdMap[p.id];
+      return {
+        ...p, id: pathId, timetable_id: newId,
+        stops: (p.stops || []).map((ps) => ({
+          ...ps, id: uuidv4(), path_id: pathId,
+          station_id: stationIdMap[ps.station_id] || ps.station_id,
+        })),
+      };
+    }),
+  };
+  db.timetables.push(imported);
+  writeDB(db);
+  res.status(201).json(normalise(imported));
+});
+
 app.post('/api/timetables/:id/duplicate', (req, res) => {
   const db = readDB();
   const original = db.timetables.find((t) => t.id === req.params.id);

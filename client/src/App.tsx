@@ -308,6 +308,34 @@ export default function App() {
     setViewOffset(maxPan > 0 ? Math.max(0, Math.min(1, (newViewStart - start) / maxPan)) : 0);
   }
 
+  // ── Export / Import ──────────────────────────────────
+
+  function handleExportTimetable() {
+    if (!timetable) return;
+    const json = JSON.stringify(timetable, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${timetable.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportTimetable(file: File) {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const imported = await api.importTimetable(data);
+      const list = await refreshList();
+      const found = list.find((t) => t.id === imported.id);
+      if (found) setSelectedId(found.id);
+    } catch (err) {
+      console.error('Import failed:', err);
+      alert('Failed to import timetable. Make sure the file is a valid timetable JSON export.');
+    }
+  }
+
   // ── Render ───────────────────────────────────────────────────
 
   return (
@@ -337,6 +365,8 @@ export default function App() {
         onDeleteTrain={handleDeleteTrain}
         hiddenTrainIds={hiddenTrainIds}
         onToggleTrainVisibility={handleToggleTrainVisibility}
+        onExportTimetable={handleExportTimetable}
+        onImportTimetable={handleImportTimetable}
       />
 
       {/* ── MAIN GRAPH AREA ── */}
