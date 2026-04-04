@@ -35,6 +35,9 @@ export default function App() {
   const [hiddenTrainIds, setHiddenTrainIds] = useState<Set<string>>(new Set());
   useEffect(() => { setHiddenTrainIds(new Set()); }, [selectedId]);
 
+  // ── Crew train hover (highlights train in graph from Sidebar) ──
+  const [hoveredCrewTrainId, setHoveredCrewTrainId] = useState<string | null>(null);
+
   function handleToggleTrainVisibility(trainId: string) {
     setHiddenTrainIds((prev) => {
       const next = new Set(prev);
@@ -174,6 +177,11 @@ export default function App() {
     }
   }
 
+  async function handleSetActiveTimetable(id: string | null) {
+    await api.setActiveTimetable(id);
+    await refreshList();
+  }
+
   // ── Station CRUD ─────────────────────────────────────────────
 
   async function handleAddStation(data: {
@@ -243,6 +251,62 @@ export default function App() {
     const updated = await api.deletePath(selectedId, pathId);
     recordAndSet(updated);
     if (modal.type === 'editPath') setModal({ type: 'none' });
+  }
+
+  // ── Crew CRUD ────────────────────────────────────────────────
+
+  async function handleAddCrew(data: { name: string; color: string }) {
+    if (!selectedId) return;
+    const updated = await api.addCrew(selectedId, data);
+    recordAndSet(updated);
+  }
+
+  async function handleUpdateCrew(crewId: string, data: { name: string; color: string }) {
+    if (!selectedId) return;
+    const updated = await api.updateCrew(selectedId, crewId, data);
+    recordAndSet(updated);
+  }
+
+  async function handleDeleteCrew(crewId: string) {
+    if (!selectedId) return;
+    const updated = await api.deleteCrew(selectedId, crewId);
+    recordAndSet(updated);
+  }
+
+  async function handleReorderCrews(order: string[]) {
+    if (!selectedId) return;
+    const updated = await api.reorderCrews(selectedId, order);
+    recordAndSet(updated);
+  }
+
+  async function handleAutoAssignCrews(data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean }): Promise<string[]> {
+    if (!selectedId) return [];
+    const result = await api.autoAssignCrews(selectedId, data);
+    const { unassigned = [], ...timetable } = result as any;
+    recordAndSet(timetable);
+    return unassigned;
+  }
+
+  async function handleUnassignTrain(trainId: string) {
+    if (!selectedId || !timetable) return;
+    const train = timetable.trains.find((t) => t.id === trainId);
+    if (!train) return;
+    const updated = await api.updateTrain(selectedId, trainId, {
+      name: train.name,
+      color: train.color,
+      notes: train.notes,
+      trainType: train.train_type,
+      trainId: train.train_id,
+      direction: train.direction,
+      crewId: undefined,
+      stops: train.stops.map((s) => ({
+        stationId: s.station_id,
+        arrival: s.arrival,
+        departure: s.departure,
+        specialInstructions: s.special_instructions,
+      })),
+    });
+    recordAndSet(updated);
   }
 
   // ── Undo / Redo ──────────────────────────────────────────────
@@ -354,6 +418,7 @@ export default function App() {
         }
         onDeleteTimetable={handleDeleteTimetable}
         onDuplicateTimetable={handleDuplicateTimetable}
+        onSetActiveTimetable={handleSetActiveTimetable}
         onAddStation={handleAddStation}
         onUpdateStation={handleUpdateStation}
         onDeleteStation={handleDeleteStation}
@@ -367,6 +432,13 @@ export default function App() {
         onToggleTrainVisibility={handleToggleTrainVisibility}
         onExportTimetable={handleExportTimetable}
         onImportTimetable={handleImportTimetable}
+        onAddCrew={handleAddCrew}
+        onUpdateCrew={handleUpdateCrew}
+        onDeleteCrew={handleDeleteCrew}
+        onReorderCrews={handleReorderCrews}
+        onAutoAssignCrews={handleAutoAssignCrews}
+        onUnassignTrain={handleUnassignTrain}
+        onCrewTrainHover={setHoveredCrewTrainId}
       />
 
       {/* ── MAIN GRAPH AREA ── */}
@@ -481,6 +553,7 @@ export default function App() {
               viewEnd={viewEnd}
               clockTime={clockTime}
               onPan={handlePan}
+              externalHoveredId={hoveredCrewTrainId}
             />
           )}
         </div>
@@ -500,6 +573,7 @@ export default function App() {
           train={modal.type === 'editTrain' ? modal.train : undefined}
           stations={timetable.stations}
           paths={timetable.paths}
+          crews={timetable.crews}
           existingColors={timetable.trains.map((t) => t.color)}
           onDraftChange={setDraftTrain}
           onSave={handleSaveTrain}

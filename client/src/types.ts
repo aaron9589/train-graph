@@ -8,6 +8,7 @@ export interface TimetableSummary {
   end_time: string;
   created_at: string;
   updated_at: string;
+  active?: boolean;
 }
 
 export interface Station {
@@ -31,6 +32,13 @@ export interface TrainStop {
   special_instructions?: string;
 }
 
+export interface Crew {
+  id: string;
+  timetable_id: string;
+  name: string;
+  color: string;
+}
+
 export interface Train {
   id: string;
   timetable_id: string;
@@ -40,7 +48,7 @@ export interface Train {
   train_type?: string;
   train_id?: string;
   direction?: string;
-  forms_next_service?: string;
+  crew_id?: string;
   stops: TrainStop[];
 }
 
@@ -54,6 +62,7 @@ export interface Timetable extends TimetableSummary {
   stations: Station[];
   trains: Train[];
   paths: Path[];
+  crews: Crew[];
   settings: TimetableSettings;
 }
 
@@ -93,7 +102,7 @@ export interface TrainRequest {
   trainType?: string;
   trainId?: string;
   direction?: string;
-  formsNextService?: string;
+  crewId?: string;
   stops: StopRequest[];
 }
 

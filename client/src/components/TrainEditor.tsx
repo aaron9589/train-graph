@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Station, Train, TrainStop, TrainRequest, Path, PathStop } from '../types';
+import type { Station, Train, TrainStop, TrainRequest, Path, PathStop, Crew } from '../types';
 
 interface StopForm {
   stationId: string;
@@ -15,6 +15,7 @@ interface Props {
   train?: Train;
   stations: Station[];
   paths: Path[];
+  crews?: Crew[];
   existingColors?: string[];
   onDraftChange: (draft: Train) => void;
   onSave: (data: TrainRequest) => void;
@@ -28,7 +29,7 @@ const PRESET_COLORS = [
   '#84cc16', '#fb923c',
 ];
 
-export function TrainEditor({ train, stations, paths, existingColors, onDraftChange, onSave, onDelete, onClose }: Props) {
+export function TrainEditor({ train, stations, paths, crews = [], existingColors, onDraftChange, onSave, onDelete, onClose }: Props) {
   const sorted = [...stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
   // Keep original stops around so we can restore all-stations view if path is deselected
   const trainStopsRef = useRef(train?.stops);
@@ -45,7 +46,7 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
   const [trainType, setTrainType] = useState(train?.train_type ?? '');
   const [trainIdField, setTrainIdField] = useState(train?.train_id ?? '');
   const [direction, setDirection] = useState(train?.direction ?? '');
-  const [formsNextService, setFormsNextService] = useState(train?.forms_next_service ?? '');
+  const [crewId, setCrewId] = useState(train?.crew_id ?? '');
   const [stops, setStops] = useState<StopForm[]>(() => buildStopForms(sorted, train?.stops));
   const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -73,10 +74,10 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
       train_type: trainType,
       train_id: trainIdField,
       direction,
-      forms_next_service: formsNextService,
+      crew_id: crewId || undefined,
       stops: draftStops,
     };
-  }, [name, color, notes, trainType, trainIdField, direction, formsNextService, stops, train]);
+  }, [name, color, notes, trainType, trainIdField, direction, crewId, stops, train]);
 
   useEffect(() => {
     onDraftChange(buildDraft());
@@ -218,7 +219,7 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
         specialInstructions: s.specialInstructions || undefined,
       }));
 
-    onSave({ id: train?.id, name: name.trim(), color, notes, trainType, trainId: trainIdField, direction, formsNextService, stops: saveStops });
+    onSave({ id: train?.id, name: name.trim(), color, notes, trainType, trainId: trainIdField, direction, crewId: crewId || undefined, stops: saveStops });
   }
 
   return (
@@ -364,17 +365,22 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
             </div>
           </div>
 
-          {/* Forms next service */}
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Forms next service (optional)</label>
-            <input
-              value={formsNextService}
-              onChange={(e) => setFormsNextService(e.target.value)}
-              placeholder="e.g. K352"
-              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 text-sm"
-            />
-            <p className="text-xs text-slate-600 mt-1">Shown as the Departure Time on the last stop in the live API output.</p>
-          </div>
+          {/* Crew assignment */}
+          {crews.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Crew</label>
+              <select
+                value={crewId}
+                onChange={(e) => setCrewId(e.target.value)}
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-white focus:outline-none focus:border-blue-500 text-sm"
+              >
+                <option value="">— Unassigned —</option>
+                {crews.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Stop times table */}
           <div>
