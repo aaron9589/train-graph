@@ -188,12 +188,24 @@ export function Sidebar({
                 <Chevron open={openSections.trains} />
                 Trains
               </button>
-              <button
-                onClick={onNewTrain}
-                className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
-              >
-                + Add
-              </button>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`${(import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '')}/api/timetables/${timetable.id}/live/trains`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`Live API — /api/timetables/${timetable.id}/live/trains`}
+                  className="text-slate-600 hover:text-blue-400 transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <LinkIcon />
+                </a>
+                <button
+                  onClick={onNewTrain}
+                  className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+                >
+                  + Add
+                </button>
+              </div>
             </div>
             {openSections.trains && (
               <>
@@ -203,6 +215,8 @@ export function Sidebar({
                 <div className="space-y-1">
                   {sortTrains(timetable.trains).map((train) => {
                     const hidden = hiddenTrainIds.has(train.id);
+                    const hasNotes = !!train.notes;
+                    const hasSpecialInstructions = train.stops.some((s) => !!s.special_instructions);
                     return (
                     <div
                       key={train.id}
@@ -214,6 +228,22 @@ export function Sidebar({
                         style={{ background: train.color, opacity: hidden ? 0.35 : 1 }}
                       />
                       <span className={`flex-1 text-sm truncate ${hidden ? 'text-slate-600' : 'text-slate-300'}`}>{train.name}</span>
+                      {(hasNotes || hasSpecialInstructions) && (
+                        <span className="flex items-center gap-0.5 shrink-0">
+                          {hasNotes && (
+                            <span
+                              className="w-1.5 h-1.5 rounded-full bg-blue-400"
+                              title="Has train notes"
+                            />
+                          )}
+                          {hasSpecialInstructions && (
+                            <span
+                              className="w-1.5 h-1.5 rounded-full bg-amber-400"
+                              title="Has special instructions"
+                            />
+                          )}
+                        </span>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); onToggleTrainVisibility(train.id); }}
                         title={hidden ? 'Show on graph' : 'Hide from graph'}
@@ -465,6 +495,15 @@ function DownloadIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   );
 }

@@ -285,13 +285,16 @@ app.delete('/api/timetables/:id/paths/:pathId', (req, res) => {
 });
 
 app.post('/api/timetables/:id/trains', (req, res) => {
-  const { name, color, notes, stops } = req.body;
+  const { name, color, notes, trainType, trainId: trainIdField, direction, formsNextService, stops } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const trainId = uuidv4();
   const updated = mutateTimetable(req.params.id, (tt) => {
     tt.trains.push({
       id: trainId, timetable_id: req.params.id, name: name.trim(),
-      color: color || '#3b82f6', notes: notes || '', stops: buildStops(trainId, stops || []),
+      color: color || '#3b82f6', notes: notes || '',
+      train_type: trainType || '', train_id: trainIdField || '', direction: direction || '',
+      forms_next_service: formsNextService || '',
+      stops: buildStops(trainId, stops || []),
     });
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -299,12 +302,14 @@ app.post('/api/timetables/:id/trains', (req, res) => {
 });
 
 app.put('/api/timetables/:id/trains/:trainId', (req, res) => {
-  const { name, color, notes, stops } = req.body;
+  const { name, color, notes, trainType, trainId: trainIdField, direction, formsNextService, stops } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
     const tr = tt.trains.find((t) => t.id === req.params.trainId);
     if (tr) {
       tr.name = name.trim(); tr.color = color || '#3b82f6'; tr.notes = notes || '';
+      tr.train_type = trainType || ''; tr.train_id = trainIdField || ''; tr.direction = direction || '';
+      tr.forms_next_service = formsNextService || '';
       tr.stops = buildStops(req.params.trainId, stops || []);
     }
   });
@@ -335,6 +340,7 @@ function buildStops(trainId, stops) {
     .map((s) => ({
       id: uuidv4(), train_id: trainId, station_id: s.stationId,
       arrival: s.arrival || null, departure: s.departure || null,
+      special_instructions: s.specialInstructions || null,
     }));
 }
 
@@ -350,6 +356,64 @@ function normalise(tt) {
     ),
   };
 }
+
+// ── Live API (external system integration) ────────────────────────────────────
+
+app.get('/api/timetables/:id/live/trains', (req, res) => {
+  const tt = getTimetable(req.params.id);
+  if (!tt) return res.status(404).json({ error: 'Not found' });
+  const trainIds = (tt.trains || []).map((tr) => ({
+    id: tr.name,
+    trainType: tr.train_type || '',
+  }));
+  res.json({ trainIds });
+});
+
+app.get('/api/timetables/:id/live/trains/:trainName', (req, res) => {
+  const tt = getTimetable(req.params.id);
+  if (!tt) return res.status(404).json({ error: 'Not found' });
+  const train = (tt.trains || []).find((tr) => tr.name === req.params.trainName);
+  if (!train) return res.status(404).json({ error: 'Train not found' });
+  const stationMap = new Map((tt.stations || []).map((s) => [s.id, s]));
+  function fmtTime(t) {
+    if (!t) return null;
+    return t.replace(/^0(\d):/, '$1:');
+  }
+  function stopMinutes(stop) {
+    const t = stop.arrival || stop.departure;
+    if (!t) return Infinity;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+  const sortedStops = [...(train.stops || [])].sort((a, b) => stopMinutes(a) - stopMinutes(b));
+  const lastIdx = sortedStops.length - 1;
+  const timetable = sortedStops.map((stop, idx) => {
+    const station = stationMap.get(stop.station_id);
+    const isLast = idx === lastIdx;
+    const formsNext = isLast && train.forms_next_service;
+    // When forms_next_service is set, the departure slot shows the next service number
+    // rather than a time, so always show the arrival independently.
+    const showArrival = stop.arrival && (formsNext || stop.arrival !== stop.departure);
+    const departureValue = formsNext ? train.forms_next_service : fmtTime(stop.departure);
+    const row = {
+      'Train Number': train.name,
+      'Train Type': train.train_type || '',
+      'Stop Name': station ? station.name : stop.station_id,
+      ...(showArrival ? { 'Arrival Time': fmtTime(stop.arrival) } : {}),
+      ...(departureValue ? { 'Departure Time': departureValue } : {}),
+      'Train ID': train.train_id || '',
+      'Direction': train.direction || '',
+    };
+    if (idx === 0 && train.notes) {
+      row['Train Notes'] = train.notes;
+    }
+    if (stop.special_instructions) {
+      row['Special Instructions'] = stop.special_instructions;
+    }
+    return row;
+  });
+  res.json({ trainId: train.name, timetable });
+});
 
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (_req, res) => {

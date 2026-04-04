@@ -8,6 +8,7 @@ interface StopForm {
   arrival: string;
   departure: string;
   dwell: string; // minutes, used to compute departure and cascade
+  specialInstructions: string;
 }
 
 interface Props {
@@ -41,6 +42,10 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
     return pool[Math.floor(Math.random() * pool.length)];
   });
   const [notes, setNotes] = useState(train?.notes ?? '');
+  const [trainType, setTrainType] = useState(train?.train_type ?? '');
+  const [trainIdField, setTrainIdField] = useState(train?.train_id ?? '');
+  const [direction, setDirection] = useState(train?.direction ?? '');
+  const [formsNextService, setFormsNextService] = useState(train?.forms_next_service ?? '');
   const [stops, setStops] = useState<StopForm[]>(() => buildStopForms(sorted, train?.stops));
   const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -56,6 +61,7 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
         station_id: s.stationId,
         arrival: s.arrival || null,
         departure: s.departure || null,
+        special_instructions: s.specialInstructions || undefined,
       }));
 
     return {
@@ -64,9 +70,13 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
       name: name || '(unnamed)',
       color,
       notes,
+      train_type: trainType,
+      train_id: trainIdField,
+      direction,
+      forms_next_service: formsNextService,
       stops: draftStops,
     };
-  }, [name, color, notes, stops, train]);
+  }, [name, color, notes, trainType, trainIdField, direction, formsNextService, stops, train]);
 
   useEffect(() => {
     onDraftChange(buildDraft());
@@ -155,6 +165,7 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
           arrival: existing?.arrival ?? '',
           departure: existing?.departure ?? '',
           dwell: existing?.dwell ?? '',
+          specialInstructions: existing?.specialInstructions ?? '',
         };
       });
     setStops(newStops);
@@ -204,9 +215,10 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
         stationId: s.stationId,
         arrival: s.arrival || null,
         departure: s.departure || null,
+        specialInstructions: s.specialInstructions || undefined,
       }));
 
-    onSave({ id: train?.id, name: name.trim(), color, notes, stops: saveStops });
+    onSave({ id: train?.id, name: name.trim(), color, notes, trainType, trainId: trainIdField, direction, formsNextService, stops: saveStops });
   }
 
   return (
@@ -318,6 +330,50 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
               rows={2}
               className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 text-sm resize-none"
             />
+            <p className="text-xs text-slate-600 mt-1">Shown as Train Notes on the first stop in the live API output.</p>
+          </div>
+
+          {/* Train metadata */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Train Type</label>
+              <input
+                value={trainType}
+                onChange={(e) => setTrainType(e.target.value)}
+                placeholder="e.g. L"
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Train ID</label>
+              <input
+                value={trainIdField}
+                onChange={(e) => setTrainIdField(e.target.value)}
+                placeholder="e.g. CityRail 2L"
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Direction</label>
+              <input
+                value={direction}
+                onChange={(e) => setDirection(e.target.value)}
+                placeholder="e.g. FWD"
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+              />
+            </div>
+          </div>
+
+          {/* Forms next service */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Forms next service (optional)</label>
+            <input
+              value={formsNextService}
+              onChange={(e) => setFormsNextService(e.target.value)}
+              placeholder="e.g. K352"
+              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+            />
+            <p className="text-xs text-slate-600 mt-1">Shown as the Departure Time on the last stop in the live API output.</p>
           </div>
 
           {/* Stop times table */}
@@ -357,10 +413,12 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
                 {stops.map((stop, idx) => (
                   <div
                     key={stop.stationId}
-                    className={`grid grid-cols-[1fr_100px_100px_58px] gap-0 border-b border-slate-800 last:border-0 ${
+                    className={`border-b border-slate-800 last:border-0 ${
                       stop.arrival || stop.departure ? 'bg-slate-800/40' : ''
                     }`}
                   >
+                    {/* Times row */}
+                    <div className="grid grid-cols-[1fr_100px_100px_58px] gap-0">
                     {/* Station cell */}
                     <div className="px-3 py-2 flex flex-col justify-center">
                       <span className="text-sm text-slate-300">{stop.stationName}</span>
@@ -400,6 +458,26 @@ export function TrainEditor({ train, stations, paths, existingColors, onDraftCha
                         className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded text-center placeholder:text-slate-600"
                       />
                     </div>
+                    </div>
+
+                    {/* Special instructions sub-row — shown for any timed stop */}
+                    {(stop.arrival || stop.departure || stop.specialInstructions) && (
+                      <div className="px-3 pb-2">
+                        <input
+                          type="text"
+                          value={stop.specialInstructions}
+                          onChange={(e) =>
+                            setStops((prev) =>
+                              prev.map((s, i) =>
+                                i === idx ? { ...s, specialInstructions: e.target.value } : s
+                              )
+                            )
+                          }
+                          placeholder="Special instructions for this stop…"
+                          className="w-full bg-transparent text-xs text-amber-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1 rounded border border-slate-700/50 focus:border-amber-500/50 placeholder:text-slate-600"
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -476,6 +554,7 @@ function buildStopForms(stations: Station[], existingStops?: TrainStop[]): StopF
       arrival: existing?.arrival ?? '',
       departure: existing?.departure ?? '',
       dwell: '',
+      specialInstructions: existing?.special_instructions ?? '',
     };
   });
 }

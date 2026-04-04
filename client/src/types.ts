@@ -28,6 +28,7 @@ export interface TrainStop {
   station_id: string;
   arrival: string | null;
   departure: string | null;
+  special_instructions?: string;
 }
 
 export interface Train {
@@ -36,6 +37,10 @@ export interface Train {
   name: string;
   color: string;
   notes: string;
+  train_type?: string;
+  train_id?: string;
+  direction?: string;
+  forms_next_service?: string;
   stops: TrainStop[];
 }
 
@@ -77,6 +82,7 @@ export interface StopRequest {
   stationId: string;
   arrival: string | null;
   departure: string | null;
+  specialInstructions?: string;
 }
 
 export interface TrainRequest {
@@ -84,6 +90,10 @@ export interface TrainRequest {
   name: string;
   color: string;
   notes: string;
+  trainType?: string;
+  trainId?: string;
+  direction?: string;
+  formsNextService?: string;
   stops: StopRequest[];
 }
 
