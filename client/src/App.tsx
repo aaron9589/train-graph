@@ -35,6 +35,10 @@ export default function App() {
   const [hiddenTrainIds, setHiddenTrainIds] = useState<Set<string>>(new Set());
   useEffect(() => { setHiddenTrainIds(new Set()); }, [selectedId]);
 
+  // ── Crew filter (show only one operator's trains on graph) ────
+  const [crewFilter, setCrewFilter] = useState<string | null>(null);
+  useEffect(() => { setCrewFilter(null); }, [selectedId]);
+
   // ── Crew train hover (highlights train in graph from Sidebar) ──
   const [hoveredCrewTrainId, setHoveredCrewTrainId] = useState<string | null>(null);
 
@@ -131,8 +135,9 @@ export default function App() {
         : [...trains, draftTrain];
     }
     trains = trains.filter((t) => !hiddenTrainIds.has(t.id));
+    if (crewFilter) trains = trains.filter((t) => t.crew_id === crewFilter);
     return { ...timetable, trains };
-  }, [timetable, draftTrain, hiddenTrainIds]);
+  }, [timetable, draftTrain, hiddenTrainIds, crewFilter]);
 
   // ── Timetable CRUD ───────────────────────────────────────────
 
@@ -229,6 +234,7 @@ export default function App() {
     if (!selectedId) return;
     const updated = await api.deleteTrain(selectedId, trainId);
     recordAndSet(updated);
+    setDraftTrain(null);
     if (modal.type === 'editTrain') setModal({ type: 'none' });
   }
 
@@ -487,6 +493,30 @@ export default function App() {
                   title="Zoom in"
                   className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-800 text-lg leading-none"
                 >+</button>
+                <span className="text-slate-700 mx-1">|</span>
+                {/* Crew filter */}
+                {timetable.crews && timetable.crews.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={crewFilter ?? ''}
+                      onChange={(e) => setCrewFilter(e.target.value || null)}
+                      className="text-xs bg-slate-800 border border-slate-700 text-slate-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500 cursor-pointer"
+                      title="Filter graph by operator"
+                    >
+                      <option value="">All operators</option>
+                      {timetable.crews.map((crew) => (
+                        <option key={crew.id} value={crew.id}>{crew.name}</option>
+                      ))}
+                    </select>
+                    {crewFilter && (
+                      <button
+                        onClick={() => setCrewFilter(null)}
+                        className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                        title="Clear filter"
+                      >✕</button>
+                    )}
+                  </div>
+                )}
                 <span className="text-slate-700 mx-1">|</span>
                 {/* Fast clock indicator */}
                 {timetable.settings?.clock_enabled && (
