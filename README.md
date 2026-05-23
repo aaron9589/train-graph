@@ -41,6 +41,12 @@
 - **Graph filter** — filter the graph in the header bar to show only one operator's trains
 - **Crew hover highlight** — hover a crew member to highlight all their trains on the graph
 
+![Auto-assign crew panel](docs/screenshots/05b-crew-auto-assign.png)
+
+![Assigning a train to a crew member in the train editor](docs/screenshots/05c-train-crew-assignment.png)
+
+![Graph filtered to a single operator's trains](docs/screenshots/05d-crew-filter-graph.png)
+
 ### Paths (Route Templates)
 - **Reusable path templates** — define a route with station sequence and travel/dwell times
 - **Apply to new trains** — pre-fill all stop times when adding a train, based on a departure time

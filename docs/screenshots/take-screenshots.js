@@ -133,6 +133,62 @@ const OUT = '/shots';
   }
   console.log('✓ 05-crew-section.png');
 
+  // ── 5b. Auto-assign panel open ────────────────────────────────────────────
+  const autoAssignBtn = page.locator('aside:not(.fixed) button').filter({ hasText: 'Auto-assign' }).first();
+  if (await autoAssignBtn.isVisible().catch(() => false)) {
+    await autoAssignBtn.click();
+    await page.waitForTimeout(500);
+    // Scroll so the "Crew pool" label (top of panel) is near the top of the sidebar
+    const crewPoolLabel = page.locator('aside:not(.fixed)').locator('text=Crew pool').first();
+    await crewPoolLabel.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(300);
+    await page.screenshot({
+      path: `${OUT}/05b-crew-auto-assign.png`,
+      clip: sidebarBox ? { x: sidebarBox.x, y: sidebarBox.y, width: sidebarBox.width, height: sidebarBox.height } : undefined,
+    });
+    console.log('✓ 05b-crew-auto-assign.png');
+    // Close the auto-assign panel
+    const cancelBtn = page.locator('aside:not(.fixed) button').filter({ hasText: 'Cancel' }).first();
+    if (await cancelBtn.isVisible().catch(() => false)) await cancelBtn.click();
+    await page.waitForTimeout(300);
+  }
+
+  // ── 5c. Train editor — crew assignment field ──────────────────────────────
+  await page.evaluate(() => {
+    const aside = document.querySelector('aside:not(.fixed)');
+    if (aside) aside.scrollTop = 0;
+  });
+  await page.waitForTimeout(300);
+  const trainItem2 = page.locator('aside:not(.fixed)').locator('text=8L02').first();
+  await trainItem2.click();
+  await page.waitForTimeout(800);
+  // Scroll inside the editor panel to bring the Crew dropdown into view
+  await page.evaluate(() => {
+    const panel = document.querySelector('aside.fixed');
+    const crewLabel = Array.from(panel?.querySelectorAll('label') ?? [])
+      .find(l => l.textContent?.trim() === 'Crew');
+    if (crewLabel) crewLabel.scrollIntoView({ block: 'center', behavior: 'instant' });
+  });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/05c-train-crew-assignment.png` });
+  console.log('✓ 05c-train-crew-assignment.png');
+  await closeAnyPanel();
+
+  // ── 5d. Crew-filtered train graph ─────────────────────────────────────────
+  await setZoom(1);
+  const crewFilterSelect = page.locator('select[title="Filter graph to show only trains assigned to this crew member"]');
+  if (await crewFilterSelect.isVisible().catch(() => false)) {
+    const firstCrewValue = await crewFilterSelect.locator('option').nth(1).getAttribute('value').catch(() => null);
+    if (firstCrewValue) {
+      await crewFilterSelect.selectOption({ value: firstCrewValue });
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${OUT}/05d-crew-filter-graph.png` });
+      console.log('✓ 05d-crew-filter-graph.png');
+      await crewFilterSelect.selectOption({ value: '' });
+      await page.waitForTimeout(300);
+    }
+  }
+
   // ── 6. Stations section ───────────────────────────────────────────────────
   const stationsHeader = page.locator('aside').locator('text=STATIONS').first();
   await stationsHeader.scrollIntoViewIfNeeded().catch(() => {});
