@@ -20,7 +20,7 @@
 - **Configurable time window** — set custom start and end times per timetable
 - **Zoom** — zoom up to 8× on the time axis for detailed planning
 - **Real-time preview** — graph updates live as you edit stop times
-- **Tooltips** — hover any train line to see its name, origin, destination, and stop times
+- **Tooltips** — hover any train line to see its name, origin, destination, and stop times; if the same locomotive roster ID runs again later in the session, a **Next service** indicator shows the next departure
 - **Show / hide trains** — toggle individual trains on/off without deleting them
 - **Undo / Redo** — full undo history across the session
 
@@ -40,6 +40,7 @@
 - **Auto-assign** — automatically distribute trains across selected crew members
 - **Graph filter** — filter the graph in the header bar to show only one operator's trains
 - **Crew hover highlight** — hover a crew member to highlight all their trains on the graph
+- **Drag to reorder** — drag crew members in the sidebar to set their display order
 
 ![Auto-assign crew panel](docs/screenshots/05b-crew-auto-assign.png)
 
@@ -64,12 +65,18 @@
 
 ![Settings panel](docs/screenshots/08-settings-panel.png)
 
+### Station Report
+- **Per-station timetable** — select any station to see all scheduled services with arrival/departure times and service type (`[ORG]` / `[CAL]` / `[TRM]`)
+- **Train notes and special instructions** — per-stop operator guidance shown alongside each service
+- **Printable A5 landscape format** — generates a dot-matrix-style register of arrivals and departures, ready to hand out at a physical station during a session
+- Accessible via the printer icon in the header toolbar
+
+![Station report — Nowra](docs/screenshots/09-station-report.png)
+
 ### Live API for External Systems
 - Read-only REST API for guard panels, operator apps, and JMRI integrations
 - Returns active train list and full stop-by-stop timetables
 - All times formatted as `H:MM` (no leading zero) to match JMRI clock format
-
-![Station report — Nowra](docs/screenshots/09-station-report.png)
 
 ---
 
@@ -104,13 +111,17 @@ Access at **http://localhost:3001**. Data is persisted in a Docker volume (`live
 5. **Add crew** — under *Crew*, add operator names. Assign trains via the train editor or use *Auto-assign*
 6. **Mark active** — click the 🟢 flag next to a timetable to expose it via the live API
 7. **Configure fast clock** — click the ⚙️ cog in the top bar. Enter your MQTT broker URL and topic
-8. **Export** — hover a timetable name to reveal export buttons: JSON (backup) or CATS XML
+8. **Export** — hover a timetable name to reveal export buttons: JSON (backup) or CATS XML (downloads a trains XML and a companion crews XML file)
 
 ---
 
 ## CATS XML Export
 
-Each timetable can be exported as a CATS-compatible XML file via the export button in the sidebar.
+Exporting a timetable via the sidebar button generates two files:
+
+- **`{name}.xml`** — trains export in CATS XML format, sorted chronologically by departure time
+- **`{name}-crews.xml`** — crew roster XML; only includes crew members assigned to at least one train
+
 
 | CATS Field | LiveRun Source |
 |---|---|
