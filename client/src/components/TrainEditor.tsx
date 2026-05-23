@@ -24,9 +24,26 @@ interface Props {
 }
 
 const PRESET_COLORS = [
-  '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
-  '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#a855f7',
-  '#84cc16', '#fb923c',
+  '#ef4444', // red-500
+  '#f97316', // orange-500
+  '#f59e0b', // amber-500
+  '#eab308', // yellow-500
+  '#84cc16', // lime-500
+  '#22c55e', // green-500
+  '#10b981', // emerald-500
+  '#14b8a6', // teal-500
+  '#06b6d4', // cyan-500
+  '#0ea5e9', // sky-500
+  '#3b82f6', // blue-500
+  '#6366f1', // indigo-500
+  '#8b5cf6', // violet-500
+  '#d946ef', // fuchsia-500
+  '#ec4899', // pink-500
+  '#f43f5e', // rose-500
+  '#fbbf24', // amber-400  (gold tone)
+  '#4ade80', // green-400  (bright mint)
+  '#38bdf8', // sky-400    (light sky)
+  '#c084fc', // purple-400 (soft purple)
 ];
 
 export function TrainEditor({ train, stations, paths, crews = [], existingColors, onDraftChange, onSave, onDelete, onClose }: Props) {
@@ -121,8 +138,14 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
       // Cascade in the direction of travel whenever departure effectively changed
       if (next[idx].departure) {
         // Paths are already stored in travel order → always forward.
-        // For free-form stops (graph_pos order) detect direction from times.
-        const direction = pathStops ? 'down' : detectDirection(next);
+        // For free-form stops (graph_pos order) detect direction from the
+        // *previous* (fully-cascaded) state, not from `next`. At this point
+        // `next` only has the edited stop's departure updated — downstream
+        // stops are still at their old times. If the new departure crosses
+        // the old time of the very next stop (e.g. Kiama→10:05 while Bombo
+        // is still showing 10:00), detectDirection(next) would incorrectly
+        // flip the direction, causing the cascade to go the wrong way.
+        const direction = pathStops ? 'down' : detectDirection(prev);
         next = cascadeFrom(idx, next, pathStops, prev, direction);
       }
 
