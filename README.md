@@ -192,14 +192,11 @@ Exporting via the sidebar generates two files:
 | `f3` | Origin station name |
 | `f4` | Destination station name |
 
-> **Before importing, create `f3` and `f4` as custom fields in your CATS panel.** In CATS, open the train edit record configuration and add two String fields with the following settings:
+> **Before importing, you need ORIGIN and DESTINATION fields configured in CATS Designer.** Open CATS Designer and go to **Train → Edit Train Fields**. The field keys `f3` and `f4` refer to the **3rd and 4th fields** in that list — whatever fields occupy those positions will receive the origin and destination values from the export. Make sure your 3rd and 4th fields are set up as String fields labelled `ORIGIN` and `DESTINATION` respectively:
 >
-> | Key | Label | Class | Width | Alignment | Visible | Editable |
-> |---|---|---|---|---|---|---|
-> | `f3` | `ORIGIN` | String | 120 | CENTER | ✓ | ✓ |
-> | `f4` | `DESTINATION` | String | 124 | CENTER | ✓ | ✓ |
+> ![CATS Designer — Edit Train Fields showing ORIGIN as the 3rd field and DESTINATION as the 4th](docs/screenshots/cats-edit-train-fields.png)
 >
-> If these fields don't exist in your panel, CATS will silently ignore the origin and destination values on import.
+> If the 3rd and 4th fields don't exist, or are a different type, CATS will silently ignore the origin and destination values on import.
 
 ---
 
