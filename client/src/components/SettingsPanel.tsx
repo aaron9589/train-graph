@@ -12,6 +12,8 @@ interface Props {
   onClose: () => void;
 }
 
+const API_BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '') + '/api';
+
 export function SettingsPanel({
   labelMode, onLabelModeChange, settings, onSettingsSave, clockStatus, clockError, onClose,
 }: Props) {
@@ -52,7 +54,7 @@ export function SettingsPanel({
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full mt-1 w-80 z-50 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl text-sm overflow-hidden"
+      className="absolute right-0 top-full mt-1 w-80 z-50 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl text-sm overflow-y-auto max-h-[calc(100vh-4rem)]"
     >
       {/* Station labels */}
       <div className="px-4 py-3 border-b border-slate-800">
@@ -119,6 +121,40 @@ export function SettingsPanel({
             className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-600"
           />
         </label>
+
+        {/* JMRI script download */}
+        <div className="mb-3 rounded-lg border border-slate-700 bg-slate-800/60 p-3">
+          <p className="text-xs font-semibold text-slate-300 mb-1">JMRI integration</p>
+          <p className="text-xs text-slate-500 mb-2 leading-relaxed">
+            Download a Jython script that publishes the JMRI fast clock to the topic above.
+            Compatible with JMRI&nbsp;4.17+.
+          </p>
+          <a
+            href={`${API_BASE}/download/jmri-clock-script?topic=${encodeURIComponent(local.clock_topic || 'jmri/memory/currentTime')}`}
+            download="liverun-clock.py"
+            className="inline-flex items-center gap-1.5 w-full justify-center py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            Download liverun-clock.py
+          </a>
+          <details className="mt-2">
+            <summary className="text-xs text-slate-500 cursor-pointer select-none hover:text-slate-400">
+              How to use in JMRI
+            </summary>
+            <ol className="mt-2 text-xs text-slate-500 space-y-1 list-decimal list-inside leading-relaxed">
+              <li>In JMRI open <span className="text-slate-400 font-medium">Edit &gt; Preferences &gt; Connections</span>, add a new <span className="text-slate-400 font-medium">MQTT</span> connection and enter your broker hostname and port (default&nbsp;1883).</li>
+              <li>Save the downloaded file to the <span className="font-mono text-slate-400">jython/</span> folder inside your JMRI preferences folder.</li>
+              <li>
+                To run once: <span className="text-slate-400 font-medium">Scripting &gt; Run Script…</span>
+              </li>
+              <li>
+                To run at startup: <span className="text-slate-400 font-medium">Edit &gt; Preferences &gt; Start Up &gt; Add Action &gt; Execute Jython Script</span>.
+              </li>
+            </ol>
+          </details>
+        </div>
 
         <button
           onClick={handleSave}
