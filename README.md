@@ -2,6 +2,8 @@
 
 **LiveRun** is a web application for planning and running model railway operating sessions. Build interactive train stringline (time-distance) graphs, assign operators, track a live fast clock, and expose real-time timetable data to external systems like JMRI guard panels.
 
+![Train graph overview](docs/screenshots/01-train-graph-overview.png)
+
 ---
 
 ## Features
@@ -22,11 +24,15 @@
 - **Show / hide trains** — toggle individual trains on/off without deleting them
 - **Undo / Redo** — full undo history across the session
 
+![Zoomed graph with tooltip](docs/screenshots/02-train-graph-zoomed-tooltip.png)
+
 ### Trains
 - **Colour-coded trains** — 12 preset colours plus a custom colour picker
 - **Train metadata** — store train number, type, roster ID, direction, and free-text notes
 - **Special instructions** — per-stop notes visible on guard panels and operator displays
 - **Dot indicators** on the train list: 🔵 notes · 🟡 special instructions · 🟢 crew assigned
+
+![Train editor](docs/screenshots/04-train-editor.png)
 
 ### Crew Management
 - **Define operators** — create named crew members with assigned colours
@@ -39,15 +45,25 @@
 - **Reusable path templates** — define a route with station sequence and travel/dwell times
 - **Apply to new trains** — pre-fill all stop times when adding a train, based on a departure time
 
+![Paths section — expanded list](docs/screenshots/07-paths-section.png)
+
+![Path editor](docs/screenshots/07b-path-editor.png)
+
+![New train with path selected and stops auto-filled](docs/screenshots/07f-new-train-autofilled.png)
+
 ### Fast Clock Integration
 - **MQTT fast clock** — subscribe to a broker topic (e.g. from JMRI) to show a live session clock on the graph
 - **Visual indicator** — status dot and topic name shown in the header bar
 - **Configurable** — set broker URL (`wss://`) and topic per timetable
 
+![Settings panel](docs/screenshots/08-settings-panel.png)
+
 ### Live API for External Systems
 - Read-only REST API for guard panels, operator apps, and JMRI integrations
 - Returns active train list and full stop-by-stop timetables
 - All times formatted as `H:MM` (no leading zero) to match JMRI clock format
+
+![Station report — Nowra](docs/screenshots/09-station-report.png)
 
 ---
 
