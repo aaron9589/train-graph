@@ -121,8 +121,14 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
       // Cascade in the direction of travel whenever departure effectively changed
       if (next[idx].departure) {
         // Paths are already stored in travel order → always forward.
-        // For free-form stops (graph_pos order) detect direction from times.
-        const direction = pathStops ? 'down' : detectDirection(next);
+        // For free-form stops (graph_pos order) detect direction from the
+        // *previous* (fully-cascaded) state, not from `next`. At this point
+        // `next` only has the edited stop's departure updated — downstream
+        // stops are still at their old times. If the new departure crosses
+        // the old time of the very next stop (e.g. Kiama→10:05 while Bombo
+        // is still showing 10:00), detectDirection(next) would incorrectly
+        // flip the direction, causing the cascade to go the wrong way.
+        const direction = pathStops ? 'down' : detectDirection(prev);
         next = cascadeFrom(idx, next, pathStops, prev, direction);
       }
 
