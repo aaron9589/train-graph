@@ -26,6 +26,28 @@ const spec = {
     },
   },
   paths: {
+    '/api/active-timetable': {
+      get: {
+        tags: ['Live API'],
+        summary: 'Get the active timetable ID',
+        description: 'Returns the ID of the timetable currently flagged as active. Use this ID with the `/live/trains` endpoints. Returns `null` if no timetable is active.',
+        responses: {
+          200: {
+            description: 'Active timetable ID',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', format: 'uuid', nullable: true, example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/api/timetables/{id}/live/trains': {
       parameters: [
         { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Timetable ID' },
