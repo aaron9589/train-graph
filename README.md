@@ -1,127 +1,187 @@
-# LiveRun — Operating Session Resource Planner
+# LiveRun
 
-**LiveRun** is a web application for planning and running model railway operating sessions. Build interactive train stringline (time-distance) graphs, assign operators, track a live fast clock, and expose real-time timetable data to external systems like JMRI guard panels.
+**Plan and run your model railway operating sessions — from timetable to train graph to crew assignments, all in one place.**
+
+LiveRun is a web app built for model railway clubs and home layouts. Build a stringline (time-distance) graph of your session, assign trains to operators, print station timetables, sync a live fast clock from JMRI, and expose your timetable to guard panels and operator displays via a read-only REST API.
 
 ![Train graph overview](docs/screenshots/01-train-graph-overview.png)
 
 ---
 
+## What you can do with LiveRun
+
+| | |
+|---|---|
+| **Visualise your session** | Build an interactive train graph — see every service at a glance, zoom in for detail, hover for stop times |
+| **Plan crew workloads** | Assign trains to operators, auto-distribute services, and filter the graph by crew member |
+| **Speed up train entry** | Define reusable route templates (Paths) and auto-fill all stop times from a single departure time |
+| **Print station registers** | Generate printable A5 timetables for each station — ready to hand out on the day |
+| **Connect external systems** | Feed guard panels, JMRI displays, and operator apps from a live REST API |
+| **Sync the fast clock** | Subscribe to an MQTT broker topic and see the session clock ticking on the graph |
+| **Export to CATS** | One click exports your trains and crew roster as CATS XML |
+
+---
+
 ## Features
 
-### Timetable Management
-- **Multiple timetables** — create and switch between independent operating scenarios
-- **Import / Export** — back up and restore timetables as JSON; export to CATS XML for use in other tools
-- **Active timetable flag** — mark one timetable as active so external systems (guard panels, operator displays) always resolve the current session automatically
-- **Duplicate** — clone an existing timetable as a starting point for a new session
-
 ### Train Graph
-- **Interactive stringline graph** — time on the X axis, stations on the Y axis; each train is a coloured line
-- **Distance-scaled Y axis** — stations are positioned to true distance scale using graph position values
-- **Configurable time window** — set custom start and end times per timetable
-- **Zoom** — zoom up to 8× on the time axis for detailed planning
-- **Real-time preview** — graph updates live as you edit stop times
-- **Tooltips** — hover any train line to see its name, origin, destination, and stop times; if the same locomotive roster ID runs again later in the session, a **Next service** indicator shows the next departure
-- **Show / hide trains** — toggle individual trains on/off without deleting them
-- **Undo / Redo** — full undo history across the session
+
+The heart of LiveRun — an interactive stringline graph with time on the X axis and stations on the Y axis.
+
+- Stations are spaced to true distance scale using configurable graph position values
+- Zoom up to **8×** on the time axis for detailed planning
+- **Live updates** — the graph redraws instantly as you edit stop times
+- Hover any train line for its name, origin, destination, and full stop list
+- **Next service** indicator on the tooltip when the same locomotive runs again later in the session
+- Show or hide individual trains without deleting them
+- Full **undo / redo** history
 
 ![Zoomed graph with tooltip](docs/screenshots/02-train-graph-zoomed-tooltip.png)
 
+### Timetables
+
+- **Multiple timetables** — create and switch between independent operating scenarios
+- **Configurable time window** — set a custom start and end time per timetable
+- **Duplicate** — clone an existing timetable as a starting point for a new session
+- **Import / Export** — back up and restore timetables as JSON
+
 ### Trains
-- **Colour-coded trains** — 12 preset colours plus a custom colour picker
-- **Train metadata** — store train number, type, roster ID, direction, and free-text notes
-- **Special instructions** — per-stop notes visible on guard panels and operator displays
-- **Dot indicators** on the train list: 🔵 notes · 🟡 special instructions · 🟢 crew assigned
+
+- **Colour-coded** — 12 preset colours plus a custom colour picker
+- **Rich metadata** — train number, type, roster ID, direction, and free-text notes
+- **Special instructions** — per-stop notes surfaced on guard panels and operator displays
+- At-a-glance dot indicators on the train list: 🔵 notes · 🟡 special instructions · 🟢 crew assigned
 
 ![Train editor](docs/screenshots/04-train-editor.png)
 
 ### Crew Management
-- **Define operators** — create named crew members with assigned colours
-- **Assign trains to crew** — link each train to an operator in the train editor
-- **Auto-assign** — automatically distribute trains across selected crew members
-- **Graph filter** — filter the graph in the header bar to show only one operator's trains
-- **Crew hover highlight** — hover a crew member to highlight all their trains on the graph
-- **Drag to reorder** — drag crew members in the sidebar to set their display order
+
+Organise your operators and distribute work fairly.
+
+- Create named crew members with colour coding
+- Assign trains manually or use **Auto-assign** to distribute services across selected operators
+- Filter the graph to a single operator's trains with one click
+- Hover a crew member in the sidebar to highlight all their trains on the graph
+- Drag to reorder crew members
 
 ![Auto-assign crew panel](docs/screenshots/05b-crew-auto-assign.png)
 
-![Assigning a train to a crew member in the train editor](docs/screenshots/05c-train-crew-assignment.png)
-
 ![Graph filtered to a single operator's trains](docs/screenshots/05d-crew-filter-graph.png)
 
-### Paths (Route Templates)
-- **Reusable path templates** — define a route with station sequence and travel/dwell times
-- **Apply to new trains** — pre-fill all stop times when adding a train, based on a departure time
+### Paths — Route Templates
 
-![Paths section — expanded list](docs/screenshots/07-paths-section.png)
+Stop entering stop times from scratch. Define a route once and reuse it.
+
+- Set up a station sequence with travel times and dwell times
+- When adding a train, pick a path and enter a departure time — all stops are filled automatically
 
 ![Path editor](docs/screenshots/07b-path-editor.png)
 
 ![New train with path selected and stops auto-filled](docs/screenshots/07f-new-train-autofilled.png)
 
-### Fast Clock Integration
-- **MQTT fast clock** — subscribe to a broker topic (e.g. from JMRI) to show a live session clock on the graph
-- **Visual indicator** — status dot and topic name shown in the header bar
-- **Configurable** — set broker URL (`wss://`) and topic per timetable
-
-![Settings panel](docs/screenshots/08-settings-panel.png)
-
 ### Station Report
-- **Per-station timetable** — select any station to see all scheduled services with arrival/departure times and service type (`[ORG]` / `[CAL]` / `[TRM]`)
-- **Train notes and special instructions** — per-stop operator guidance shown alongside each service
-- **Printable A5 landscape format** — generates a dot-matrix-style register of arrivals and departures, ready to hand out at a physical station during a session
-- Accessible via the printer icon in the header toolbar
+
+Generate a printable arrival/departure register for any station.
+
+- Shows all services with arrival, departure, service type (`[ORG]` / `[CAL]` / `[TRM]`), train notes, and special instructions
+- **A5 landscape** format in a dot-matrix register style — print and hand out at each physical station
+- Open via the printer icon in the header toolbar
 
 ![Station report — Nowra](docs/screenshots/09-station-report.png)
 
+### Fast Clock
+
+- Connect to an **MQTT broker** (e.g. from JMRI) to show a live session clock on the graph
+- Status dot and topic name displayed in the header
+- Broker URL and topic are configured per timetable
+
+![Settings panel](docs/screenshots/08-settings-panel.png)
+
 ### Live API for External Systems
-- Read-only REST API for guard panels, operator apps, and JMRI integrations
-- Returns active train list and full stop-by-stop timetables
-- All times formatted as `H:MM` (no leading zero) to match JMRI clock format
+
+Mark a timetable as *active* and it's immediately available to guard panels, JMRI displays, and operator apps via a read-only REST API. See the [API reference](#live-timetable-api) below.
 
 ---
 
-## Quick Start (development)
+## Getting Started
+
+The easiest way to run LiveRun is with **Docker Desktop** — a free app that runs LiveRun in a self-contained environment with no setup, no dependencies, and no risk of breaking anything else on your computer.
+
+### Step 1 — Install Docker Desktop
+
+Go to **https://www.docker.com/products/docker-desktop** and download the installer for your operating system (Windows or Mac). Run it and follow the prompts. Once installed, open Docker Desktop and wait for it to show the green "Engine running" status in the bottom-left corner. You only need to do this once.
+
+### Step 2 — Download LiveRun
+
+Click the green **Code** button at the top of this page and choose **Download ZIP**. Extract it somewhere convenient (e.g. your Desktop or Documents folder).
+
+### Step 3 — Open a terminal in the LiveRun folder
+
+- **Windows:** Open the extracted folder in File Explorer, then click the address bar at the top, type `cmd`, and press Enter.
+- **Mac:** Right-click the extracted folder and choose *New Terminal at Folder* (or open Terminal and drag the folder in).
+
+### Step 4 — Start LiveRun
+
+Paste this command into the terminal and press Enter:
+
+```bash
+docker compose up -d
+```
+
+Docker will download LiveRun (this takes a minute or two the first time) and start it. When it finishes, open your browser and go to:
+
+**http://localhost:3001**
+
+That's it — LiveRun is running.
+
+### Stopping and starting
+
+- **Stop LiveRun:** `docker compose down`
+- **Start it again:** `docker compose up -d`
+
+Your data is saved automatically between restarts. You won't lose anything by stopping LiveRun.
+
+### Updating to a newer version
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+This downloads the latest version and restarts the app. Your data is untouched.
+
+---
+
+### For developers
 
 ```bash
 npm install
 npm run dev
 ```
 
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:3001
+- App: http://localhost:5173
+- API: http://localhost:3001
 
 ---
 
-## Docker (production)
+## Running your first session
 
-```bash
-docker compose up -d
-```
-
-Access at **http://localhost:3001**. Data is persisted in a Docker volume (`liverun-data`).
-
----
-
-## Usage
-
-1. **Create a timetable** — click *+ New* in the sidebar. Set a name and time window (e.g. `06:00 – 22:00`)
+1. **Create a timetable** — click *+ New* in the sidebar. Give it a name and set the time window (e.g. `06:00 – 22:00`)
 2. **Add stations** — under *Stations*, click *+ Add*. Enter the station name, optional short code, and graph position (km or arbitrary units)
-3. **Add paths** *(optional)* — under *Paths*, define a route template with travel and dwell times. Apply it when adding trains to pre-fill stops
-4. **Add trains** — under *Trains*, click *+ Add*. Pick a colour, enter stop times, add notes and metadata. The graph updates live as you type
-5. **Add crew** — under *Crew*, add operator names. Assign trains via the train editor or use *Auto-assign*
-6. **Mark active** — click the 🟢 flag next to a timetable to expose it via the live API
-7. **Configure fast clock** — click the ⚙️ cog in the top bar. Enter your MQTT broker URL and topic
-8. **Export** — hover a timetable name to reveal export buttons: JSON (backup) or CATS XML (downloads a trains XML and a companion crews XML file)
+3. **Add paths** *(optional but recommended)* — under *Paths*, define a route with travel and dwell times per stop. You can apply these when adding trains to auto-fill all stop times
+4. **Add trains** — under *Trains*, click *+ Add*. Choose a colour, set stop times (or apply a path), and add any notes or metadata. The graph updates as you type
+5. **Add crew** — under *Crew*, add your operators. Assign trains via the train editor or click *Auto-assign*
+6. **Mark active** — click the 🟢 flag on a timetable to expose it via the live API
+7. **Configure fast clock** — click ⚙️ in the top bar and enter your MQTT broker URL and topic
+8. **Export** — hover a timetable name to reveal export options: JSON backup or CATS XML
 
 ---
 
 ## CATS XML Export
 
-Exporting a timetable via the sidebar button generates two files:
+Exporting via the sidebar generates two files:
 
-- **`{name}.xml`** — trains export in CATS XML format, sorted chronologically by departure time
-- **`{name}-crews.xml`** — crew roster XML; only includes crew members assigned to at least one train
-
+- **`{name}.xml`** — trains in CATS XML format, sorted chronologically by first departure
+- **`{name}-crews.xml`** — crew roster XML (only includes operators assigned to at least one train)
 
 | CATS Field | LiveRun Source |
 |---|---|
@@ -129,104 +189,14 @@ Exporting a timetable via the sidebar button generates two files:
 | `ENGINE` | Train ID (roster) |
 | `TRAIN_NAME` | Train notes (if < 50 characters) |
 | `DEPARTURE` | First stop departure time |
-| `f3` | First stop station name (origin) |
-| `f4` | Last stop station name (destination) |
+| `f3` | Origin station name |
+| `f4` | Destination station name |
 
 ---
 
-## Live / Public Timetable API
+## Live Timetable API
 
-A read-only API for external systems. All times use `H:MM` format with no leading zero.
-
-### Active timetable
-
-**`GET /api/active-timetable`**
-
-Returns the ID of the timetable currently marked active.
-
-```json
-{ "id": "abc123" }
-```
-
-`id` is `null` if no timetable is active. Fall back to `GET /api/timetables` in that case.
-
----
-
-### List trains
-
-**`GET /api/timetables/:id/live/trains`**
-
-Returns all trains sorted by start time.
-
-```json
-{
-  "trains": [
-    {
-      "name": "K351",
-      "trainType": "L",
-      "trainId": "CityRail 51L",
-      "direction": "Down",
-      "notes": "Stops on request at Minnamurra",
-      "nextCrewService": "K352"
-    }
-  ]
-}
-```
-
-| Field | Description |
-|---|---|
-| `name` | Train number / display name |
-| `trainType` | Short type code (e.g. `L`, `T`, `V`) |
-| `trainId` | Roster / JMRI name |
-| `direction` | Direction of travel |
-| `notes` | Free-text train notes |
-| `nextCrewService` | Next train the same crew works, if assigned |
-
----
-
-### Single train timetable
-
-**`GET /api/timetables/:id/live/trains/:trainName`**
-
-Returns the full stop-by-stop timetable for one train.
-
-```json
-{
-  "name": "K351",
-  "trainType": "L",
-  "trainId": "CityRail 51L",
-  "direction": "Down",
-  "notes": "Stops on request at Minnamurra",
-  "nextCrewService": "K352",
-  "stops": [
-    {
-      "stopName": "Kiama",
-      "arrival": null,
-      "departure": "9:05",
-      "specialInstructions": null
-    },
-    {
-      "stopName": "Minnamurra",
-      "arrival": "9:10",
-      "departure": "9:10",
-      "specialInstructions": "Request stop only"
-    },
-    {
-      "stopName": "Shellharbour Junction",
-      "arrival": "9:20",
-      "departure": null,
-      "specialInstructions": null
-    }
-  ]
-}
-```
-
-| Field | Description |
-|---|---|
-| `stopName` | Station display name |
-| `arrival` | Arrival time as `H:MM`, or `null` |
-| `departure` | Departure time as `H:MM`, or `null` |
-| `specialInstructions` | Per-stop note, or `null` |
+A read-only REST API for connecting guard panels, JMRI displays, and operator apps to the active session. Full endpoint reference is available at **`/api/docs`** when the app is running.
 
 ---
 
@@ -234,7 +204,7 @@ Returns the full stop-by-stop timetable for one train.
 
 ```
 liverun/
-├── server/           Express API server + JSON persistence
+├── server/           Express API + SQLite persistence
 ├── client/           React + TypeScript frontend (Vite + Tailwind)
 ├── Dockerfile        Multi-stage Docker build
 └── docker-compose.yml
