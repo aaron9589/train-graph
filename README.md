@@ -192,6 +192,15 @@ Exporting via the sidebar generates two files:
 | `f3` | Origin station name |
 | `f4` | Destination station name |
 
+> **Before importing, create `f3` and `f4` as custom fields in your CATS panel.** In CATS, open the train edit record configuration and add two String fields with the following settings:
+>
+> | Key | Label | Class | Width | Alignment | Visible | Editable |
+> |---|---|---|---|---|---|---|
+> | `f3` | `ORIGIN` | String | 120 | CENTER | ✓ | ✓ |
+> | `f4` | `DESTINATION` | String | 124 | CENTER | ✓ | ✓ |
+>
+> If these fields don't exist in your panel, CATS will silently ignore the origin and destination values on import.
+
 ---
 
 ## Live Timetable API
