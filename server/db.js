@@ -11,9 +11,22 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const DB_PATH = process.env.DB_PATH
-  ? process.env.DB_PATH.replace(/\.db$/, '.json')
-  : path.join(__dirname, 'data', 'train-graph.json');
+const DB_PATH = (() => {
+  const raw = process.env.DB_PATH
+    ? process.env.DB_PATH.replace(/\.db$/, '.json')
+    : path.join(__dirname, 'data', 'train-graph.json');
+  const resolved = path.resolve(raw);
+  // In production (Docker) confine the DB file to the declared data directory
+  // so that a misconfigured or tampered DB_PATH cannot redirect reads/writes
+  // to arbitrary host paths.
+  if (process.env.NODE_ENV === 'production') {
+    const allowed = path.resolve('/app/server/data');
+    if (!resolved.startsWith(allowed + path.sep) && resolved !== path.join(allowed, path.basename(resolved))) {
+      throw new Error(`DB_PATH must be within ${allowed} in production (got ${resolved})`);
+    }
+  }
+  return resolved;
+})();
 
 /** @returns {{ timetables: object[] }} */
 function readDB() {

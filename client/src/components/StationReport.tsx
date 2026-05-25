@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Timetable } from '../types';
+import { escapeHtml } from '../utils';
 
 interface Props {
   timetable: Timetable;
@@ -45,16 +46,16 @@ function buildPrintHtml(
   const tableRows = rows.length === 0
     ? `<tr><td colspan="5">No trains scheduled at this location.</td></tr>`
     : rows.map((row, i) => {
-        const name = `${row.trainName} ${serviceTag(row.serviceType)}`;
-        const instr = row.specialInstructions ? `! ${row.specialInstructions}` : '';
+        const name = `${escapeHtml(row.trainName)} ${serviceTag(row.serviceType)}`;
+        const instr = row.specialInstructions ? `! ${escapeHtml(row.specialInstructions)}` : '';
         const rowStyle = i % 2 === 0 ? 'background-color:#f7f7e6;' : 'background-color:#ffffff;';
-        const arrCell = row.serviceType !== 'originates' ? timeLabel(row.arrival) : '';
-        const depCell = row.serviceType !== 'terminates' ? timeLabel(row.departure) : '';
+        const arrCell = row.serviceType !== 'originates' ? escapeHtml(timeLabel(row.arrival)) : '';
+        const depCell = row.serviceType !== 'terminates' ? escapeHtml(timeLabel(row.departure)) : '';
         return `<tr style="${rowStyle}">
           <td>${name}</td>
           <td style="text-align:center;">${arrCell}</td>
           <td style="text-align:center;">${depCell}</td>
-          <td>${row.trainNotes || ''}</td>
+          <td>${escapeHtml(row.trainNotes || '')}</td>
           <td>${instr}</td>
         </tr>`;
       }).join('');
@@ -89,11 +90,11 @@ function buildPrintHtml(
 </head>
 <body>
   <div class="page-header">
-    <h2>${timetable.name}</h2>
+    <h2>${escapeHtml(timetable.name)}</h2>
     <h3>Register of Train Arrivals/Departures by Location</h3>
-    <h3>${station?.name ?? 'Station'}</h3>
+    <h3>${escapeHtml(station?.name ?? 'Station')}</h3>
     <div class="page-header-rule"></div>
-    <small>Session: ${timetable.start_time}&#8211;${timetable.end_time}</small>
+    <small>Session: ${escapeHtml(timetable.start_time)}&#8211;${escapeHtml(timetable.end_time)}</small>
   </div>
   <table>
     <thead>

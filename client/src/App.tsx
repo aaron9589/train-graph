@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { Timetable, TimetableSummary, TimetableSettings, Train, ModalState, TrainRequest, Path, PathRequest } from './types';
 import { api } from './api';
-import { useLocalStorage, timeToMinutes, exportCatsXml, exportCrewsXml } from './utils';
+import { useLocalStorage, timeToMinutes, exportCatsXml, exportCrewsXml, escapeHtml } from './utils';
 import { useFastClock } from './hooks/useFastClock';
 import { Sidebar } from './components/Sidebar';
 import { TrainGraph } from './components/TrainGraph';
@@ -79,7 +79,7 @@ function buildFullTimetableHtml(timetable: Timetable): string {
     const headerCells = pageTrains
       .map(
         (t) =>
-          `<th style="text-align:center;white-space:nowrap;border-bottom:2px solid ${t.color};">${t.name}</th>`
+          `<th style="text-align:center;white-space:nowrap;border-bottom:2px solid ${escapeHtml(t.color)};">${escapeHtml(t.name)}</th>`
       )
       .join('');
 
@@ -92,9 +92,9 @@ function buildFullTimetableHtml(timetable: Timetable): string {
             if (!stop) return `<td style="${rowBg}">&#8203;</td>`;
             let content: string;
             if (stop.arrival && stop.departure && stop.arrival !== stop.departure) {
-              content = `${stop.arrival}&#8202;/&#8202;${stop.departure}`;
+              content = `${escapeHtml(stop.arrival)}&#8202;/&#8202;${escapeHtml(stop.departure)}`;
             } else {
-              content = stop.arrival ?? stop.departure ?? '';
+              content = escapeHtml(stop.arrival ?? stop.departure ?? '');
             }
             const isOrigin = originStationId.get(train.id) === station.id;
             const cellStyle = `${rowBg}text-align:center;${isOrigin ? 'font-weight:bold;' : ''}`;
@@ -102,19 +102,19 @@ function buildFullTimetableHtml(timetable: Timetable): string {
           })
           .join('');
         const shortCode = station.short_code
-          ? ` <span style="font-weight:normal;color:#666;">${station.short_code}</span>`
+          ? ` <span style="font-weight:normal;color:#666;">${escapeHtml(station.short_code)}</span>`
           : '';
-        return `<tr><td style="${rowBg}font-weight:bold;">${station.name}${shortCode}</td>${cells}</tr>`;
+        return `<tr><td style="${rowBg}font-weight:bold;">${escapeHtml(station.name)}${shortCode}</td>${cells}</tr>`;
       })
       .join('');
 
     const pageLabel = pages.length > 1 ? ` (${pageIndex + 1}/${pages.length})` : '';
     return `<div style="${isLast ? '' : 'page-break-after:always;'}">
   <div style="padding-bottom:6px;">
-    <h2>${timetable.name}</h2>
+    <h2>${escapeHtml(timetable.name)}</h2>
     <h3>Working Timetable${pageLabel}</h3>
     <div class="rule"></div>
-    <small>Session: ${timetable.start_time}&#8211;${timetable.end_time} &middot; ${trains.length} train${trains.length !== 1 ? 's' : ''} &middot; ${stations.length} station${stations.length !== 1 ? 's' : ''}</small>
+    <small>Session: ${escapeHtml(timetable.start_time)}&#8211;${escapeHtml(timetable.end_time)} &middot; ${trains.length} train${trains.length !== 1 ? 's' : ''} &middot; ${stations.length} station${stations.length !== 1 ? 's' : ''}</small>
   </div>
   <table>
     <thead>
@@ -134,7 +134,7 @@ function buildFullTimetableHtml(timetable: Timetable): string {
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Working Timetable \u2014 ${timetable.name}</title>
+  <title>Working Timetable \u2014 ${escapeHtml(timetable.name)}</title>
   <style>
     @page { size: A4 landscape; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -622,7 +622,7 @@ export default function App() {
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>${timetable.name} \u2014 Train Graph</title>
+  <title>${escapeHtml(timetable.name)} \u2014 Train Graph</title>
   <style>
     @page { size: A3 landscape; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -632,7 +632,7 @@ export default function App() {
   </style>
 </head>
 <body>
-  <h2>${timetable.name} \u2014 Train Graph</h2>
+  <h2>${escapeHtml(timetable.name)} \u2014 Train Graph</h2>
   ${svgContent}
 </body>
 </html>`);

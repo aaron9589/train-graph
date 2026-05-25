@@ -1,5 +1,9 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { readDB, writeDB, getTimetable, mutateTimetable, uuidv4 } = require('./db');
 const openApiSpec = require('./openapi');
@@ -11,8 +15,39 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 // image works whether the reverse proxy rewrites the path or not.
 const BASE_PATH = (process.env.BASE_PATH || '').replace(/\/+$/, '');
 
-app.use(cors());
-app.use(express.json());
+// ── API key ──────────────────────────────────────────────────
+// Set API_KEY in the environment to use a fixed key.
+// If unset, a random key is generated each startup and printed to the log.
+const API_KEY = process.env.API_KEY || (() => {
+  const generated = crypto.randomUUID();
+  console.log('\n┌─────────────────────────────────────────────────────┐');
+  console.log('│  No API_KEY set — using auto-generated key:         │');
+  console.log(`│  ${generated}  │`);
+  console.log('│  Set API_KEY env var to make this persistent.        │');
+  console.log('└─────────────────────────────────────────────────────┘\n');
+  return generated;
+})();
+
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || null;
+app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
+app.use(express.json({ limit: '1mb' }));
+
+// 200 requests per minute across all API routes
+app.use('/api', rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false }));
+
+// Require X-API-Key on all mutating API calls (POST/PUT/DELETE).
+// GET/HEAD/OPTIONS remain open so read-only clients and live endpoints work unauthenticated.
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+  const provided = req.headers['x-api-key'];
+  if (!provided || provided !== API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized: valid X-API-Key header required' });
+  }
+  next();
+});
 
 if (BASE_PATH) {
   app.use((req, _res, next) => {
@@ -24,7 +59,8 @@ if (BASE_PATH) {
 }
 
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/dist')));
+  // Serve static assets but skip index.html — the catch-all below injects the API key into it.
+  app.use(express.static(path.join(__dirname, '../client/dist'), { index: false }));
 }
 
 const DEFAULT_SETTINGS = {
@@ -118,36 +154,70 @@ app.post('/api/timetables/import', (req, res) => {
   (data.crews || []).forEach((c) => { crewIdMap[c.id] = uuidv4(); });
   const imported = {
     id: newId,
-    name: data.name,
-    description: data.description || '',
-    start_time: data.start_time || '06:00',
-    end_time: data.end_time || '22:00',
+    name: String(data.name).trim(),
+    description: String(data.description || ''),
+    start_time: String(data.start_time || '06:00'),
+    end_time: String(data.end_time || '22:00'),
     created_at: now,
     updated_at: now,
-    settings: data.settings || { ...DEFAULT_SETTINGS },
-    stations: (data.stations || []).map((s) => ({ ...s, id: stationIdMap[s.id], timetable_id: newId })),
+    settings: { ...DEFAULT_SETTINGS, ...(data.settings && typeof data.settings === 'object' ? {
+      clock_enabled: Boolean(data.settings.clock_enabled),
+      clock_broker_url: String(data.settings.clock_broker_url || ''),
+      clock_topic: String(data.settings.clock_topic || DEFAULT_SETTINGS.clock_topic),
+    } : {}) },
+    stations: (data.stations || []).map((s) => ({
+      id: stationIdMap[s.id],
+      timetable_id: newId,
+      name: String(s.name || '').trim(),
+      short_code: String(s.short_code || ''),
+      distance: (s.distance != null && s.distance !== '' && Number.isFinite(Number(s.distance))) ? Number(s.distance) : null,
+      graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
+      sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
+    })),
     trains: (data.trains || []).map((tr) => {
       const trainId = uuidv4();
       return {
-        ...tr, id: trainId, timetable_id: newId,
+        id: trainId,
+        timetable_id: newId,
+        name: String(tr.name || '').trim(),
+        color: /^#[0-9a-fA-F]{3,8}$/.test(tr.color) ? tr.color : '#3b82f6',
+        notes: String(tr.notes || ''),
+        train_type: String(tr.train_type || ''),
+        train_id: String(tr.train_id || ''),
+        direction: String(tr.direction || ''),
         crew_id: tr.crew_id ? (crewIdMap[tr.crew_id] || null) : null,
         stops: (tr.stops || []).map((stop) => ({
-          ...stop, id: uuidv4(), train_id: trainId,
-          station_id: stationIdMap[stop.station_id] || stop.station_id,
+          id: uuidv4(),
+          train_id: trainId,
+          station_id: stationIdMap[stop.station_id] || String(stop.station_id),
+          arrival: stop.arrival ? String(stop.arrival) : null,
+          departure: stop.departure ? String(stop.departure) : null,
+          special_instructions: stop.special_instructions ? String(stop.special_instructions) : null,
         })),
       };
     }),
     paths: (data.paths || []).map((p) => {
       const pathId = pathIdMap[p.id];
       return {
-        ...p, id: pathId, timetable_id: newId,
+        id: pathId,
+        timetable_id: newId,
+        name: String(p.name || '').trim(),
         stops: (p.stops || []).map((ps) => ({
-          ...ps, id: uuidv4(), path_id: pathId,
-          station_id: stationIdMap[ps.station_id] || ps.station_id,
+          id: uuidv4(),
+          path_id: pathId,
+          station_id: stationIdMap[ps.station_id] || String(ps.station_id),
+          sort_order: Number.isFinite(Number(ps.sort_order)) ? Number(ps.sort_order) : 0,
+          travel_time_from_prev: Number.isFinite(Number(ps.travel_time_from_prev)) ? Number(ps.travel_time_from_prev) : 0,
+          dwell_time: Number.isFinite(Number(ps.dwell_time)) ? Number(ps.dwell_time) : 0,
         })),
       };
     }),
-    crews: (data.crews || []).map((c) => ({ ...c, id: crewIdMap[c.id], timetable_id: newId })),
+    crews: (data.crews || []).map((c) => ({
+      id: crewIdMap[c.id],
+      timetable_id: newId,
+      name: String(c.name || '').trim(),
+      color: /^#[0-9a-fA-F]{3,8}$/.test(c.color) ? c.color : '#94a3b8',
+    })),
   };
   db.timetables.push(imported);
   writeDB(db);
@@ -203,11 +273,55 @@ app.post('/api/timetables/:id/duplicate', (req, res) => {
 
 app.post('/api/timetables/:id/restore', (req, res) => {
   const { stations, trains, paths, crews } = req.body;
-  const updated = mutateTimetable(req.params.id, (tt) => {
-    if (Array.isArray(stations)) tt.stations = stations;
-    if (Array.isArray(trains)) tt.trains = trains;
-    if (Array.isArray(paths)) tt.paths = paths;
-    if (Array.isArray(crews)) tt.crews = crews;
+  const ttId = req.params.id;
+  const updated = mutateTimetable(ttId, (tt) => {
+    if (Array.isArray(stations)) tt.stations = stations.map((s) => ({
+      id: String(s.id),
+      timetable_id: ttId,
+      name: String(s.name || '').trim(),
+      short_code: String(s.short_code || ''),
+      distance: (s.distance != null && s.distance !== '' && Number.isFinite(Number(s.distance))) ? Number(s.distance) : null,
+      graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
+      sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
+    }));
+    if (Array.isArray(trains)) tt.trains = trains.map((tr) => ({
+      id: String(tr.id),
+      timetable_id: ttId,
+      name: String(tr.name || '').trim(),
+      color: /^#[0-9a-fA-F]{3,8}$/.test(tr.color) ? tr.color : '#3b82f6',
+      notes: String(tr.notes || ''),
+      train_type: String(tr.train_type || ''),
+      train_id: String(tr.train_id || ''),
+      direction: String(tr.direction || ''),
+      crew_id: tr.crew_id ? String(tr.crew_id) : null,
+      stops: (tr.stops || []).map((s) => ({
+        id: String(s.id),
+        train_id: String(tr.id),
+        station_id: String(s.station_id),
+        arrival: s.arrival ? String(s.arrival) : null,
+        departure: s.departure ? String(s.departure) : null,
+        special_instructions: s.special_instructions ? String(s.special_instructions) : null,
+      })),
+    }));
+    if (Array.isArray(paths)) tt.paths = paths.map((p) => ({
+      id: String(p.id),
+      timetable_id: ttId,
+      name: String(p.name || '').trim(),
+      stops: (p.stops || []).map((ps) => ({
+        id: String(ps.id),
+        path_id: String(p.id),
+        station_id: String(ps.station_id),
+        sort_order: Number.isFinite(Number(ps.sort_order)) ? Number(ps.sort_order) : 0,
+        travel_time_from_prev: Number.isFinite(Number(ps.travel_time_from_prev)) ? Number(ps.travel_time_from_prev) : 0,
+        dwell_time: Number.isFinite(Number(ps.dwell_time)) ? Number(ps.dwell_time) : 0,
+      })),
+    }));
+    if (Array.isArray(crews)) tt.crews = crews.map((c) => ({
+      id: String(c.id),
+      timetable_id: ttId,
+      name: String(c.name || '').trim(),
+      color: /^#[0-9a-fA-F]{3,8}$/.test(c.color) ? c.color : '#94a3b8',
+    }));
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
   res.json(normalise(updated));
@@ -215,6 +329,15 @@ app.post('/api/timetables/:id/restore', (req, res) => {
 
 app.put('/api/timetables/:id/settings', (req, res) => {
   const { clock_enabled, clock_broker_url, clock_topic } = req.body;
+  if (clock_broker_url !== undefined) {
+    // Only allow ws:// or wss:// broker URLs to prevent the client being
+    // directed to connect to arbitrary non-MQTT endpoints.
+    let parsedUrl = null;
+    try { parsedUrl = new URL(String(clock_broker_url)); } catch { /* invalid */ }
+    if (clock_broker_url !== '' && (!parsedUrl || !['ws:', 'wss:'].includes(parsedUrl.protocol))) {
+      return res.status(400).json({ error: 'clock_broker_url must use ws:// or wss://' });
+    }
+  }
   const updated = mutateTimetable(req.params.id, (tt) => {
     if (!tt.settings) tt.settings = { ...DEFAULT_SETTINGS };
     if (clock_enabled !== undefined) tt.settings.clock_enabled = Boolean(clock_enabled);
@@ -598,7 +721,9 @@ app.get('/api/timetables/:id/live/trains/:trainName', (req, res) => {
 
 app.get('/api/download/jmri-clock-script', (req, res) => {
   const topic = String(req.query.topic || 'jmri/memory/currentTime');
-  // Allow only safe MQTT publish-topic characters (no wildcards)
+  // Allow only safe MQTT topic characters. Double-quote is intentionally
+  // excluded — it is the Python string delimiter used below and must never
+  // appear here, even if this regex is widened in future.
   if (!/^[a-zA-Z0-9/_\-.]{1,256}$/.test(topic)) {
     return res.status(400).json({ error: 'Invalid topic' });
   }
@@ -698,14 +823,18 @@ app.get('/api/docs', (_req, res) => {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LiveRun API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.32.6/swagger-ui.css"
+        integrity="sha384-9Q2fpS+xeS4ffJy6CagnwoUl+4ldAYhOs9pgZuEKxypVModhmZFzeMlvVsAjf7uT"
+        crossorigin="anonymous" />
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.32.6/swagger-ui-bundle.js"
+          integrity="sha384-EYdOaiRwn44zNjrw+Tfs06qYz9BGQVo2f4/pLY5i7VorbjnZNhdplAbTBk8FXHUJ"
+          crossorigin="anonymous"></script>
   <script>
     SwaggerUIBundle({
-      url: '${BASE_PATH}/api/schema',
+      url: ${JSON.stringify(`${BASE_PATH}/api/schema`)},
       dom_id: '#swagger-ui',
       presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
       layout: 'BaseLayout',
@@ -717,10 +846,28 @@ app.get('/api/docs', (_req, res) => {
 });
 
 if (process.env.NODE_ENV === 'production') {
+  // Inject the API key into index.html as window.__API_KEY__ so the client
+  // can send it with every mutating request without extra configuration.
+  const rawIndexHtml = fs.readFileSync(path.join(__dirname, '../client/dist', 'index.html'), 'utf8');
+  const injectedIndexHtml = rawIndexHtml.replace(
+    '<head>',
+    `<head><script>window.__API_KEY__=${JSON.stringify(API_KEY)}</script>`
+  );
   app.get('*', (_req, res) => {
-    res.sendFile(path.join(__dirname, '../client/dist', 'index.html'));
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(injectedIndexHtml);
   });
 }
+
+// Global error handler — prevents stack traces leaking to clients
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  // Forward 4xx status codes from body-parser (e.g. 413 Payload Too Large,
+  // 400 Bad JSON) so clients get a meaningful response rather than 500.
+  const status = err.status ?? err.statusCode ?? 500;
+  const clientError = status >= 400 && status < 500;
+  res.status(status).json({ error: clientError ? err.message : 'Internal server error' });
+});
 
 app.listen(PORT, () => {
   console.log('Train Graph server listening on http://localhost:' + PORT);

@@ -41,6 +41,16 @@ function escapeXml(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/** Escape a string for safe embedding in HTML content or attribute values. */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /**
  * Export a timetable to CATS XML format.
  * Mapping:

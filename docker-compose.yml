@@ -5,12 +5,16 @@ services:
     container_name: liverun
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     volumes:
       - liverun-data:/app/server/data
     environment:
       - NODE_ENV=production
       - PORT=3001
+      # API key required for all write operations (POST/PUT/DELETE).
+      # If unset, a random key is generated each restart and printed to the container log.
+      # Generate a stable key with: openssl rand -hex 32
+      - API_KEY=
       # Set BASE_PATH if serving under a sub-path e.g. /liverun
       # Leave unset (or empty) for root / subdomain deployments
       # - BASE_PATH=/liverun
