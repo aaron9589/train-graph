@@ -276,8 +276,8 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
             </div>
           )}
 
-          {/* Path selector */}
-          {paths.length > 0 && (
+          {/* Path selector — only shown when creating a new train so the template can be applied */}
+          {paths.length > 0 && !train && (
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Path (optional)</label>
               <select
