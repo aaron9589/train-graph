@@ -12,17 +12,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
-        # package-lock.json is generated on macOS and omits Linux-specific
-        # optional deps (e.g. @rollup/rollup-linux-x64-gnu).  Removing it
-        # lets npm resolve platform packages correctly on the CI runner.
+        # npm has a known bug (https://github.com/npm/cli/issues/4828) where
+        # optional platform-specific packages (e.g. @rollup/rollup-linux-x64-gnu)
+        # are not installed when a lockfile generated on a different platform is
+        # present, even with plain npm install. Removing the lockfile first is the
+        # recommended workaround. The npm cache (restored above) still makes this fast.
         run: rm -f package-lock.json && npm install
 
       - name: Typecheck & build client

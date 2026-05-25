@@ -13,8 +13,11 @@ const BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '') + '/api';
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...init?.headers,
+    },
   });
   if (!res.ok) {
     const body = await res.text();

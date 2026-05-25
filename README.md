@@ -200,6 +200,22 @@ Exporting via the sidebar generates two files:
 
 ---
 
+## Security
+
+LiveRun has no in-app authentication. It is designed for **trusted local networks** — home layouts and club rooms — not public internet exposure.
+
+### How it is secured
+
+- **LAN-only exposure** — the app listens on port 3001 and is accessible to any device on your local network. It is not designed to be exposed to the public internet. Don't forward port 3001 on your router.
+- **Security headers** — Helmet sets `X-Frame-Options`, `X-Content-Type-Options`, HSTS, and other standard hardening headers on every response.
+- **Rate limiting** — API routes are capped at 200 requests per minute to blunt automated abuse.
+
+### Recoverability
+
+Even in the unlikely event that someone on the LAN makes an unwanted change, the damage is limited. **Timetables can be exported and re-imported as JSON** — export your timetables before a session as a backup and you can restore to any previous state in seconds.
+
+---
+
 ## Live Timetable API
 
 A read-only REST API for connecting guard panels, JMRI displays, and operator apps to the active session. Full endpoint reference is available at **`/api/docs`** when the app is running.
