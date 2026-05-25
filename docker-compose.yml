@@ -22,10 +22,12 @@ services:
       # And since timetables can be exported and re-imported as JSON, any
       # accidental or malicious write operation is trivially reversible.
       #
-      # That said, setting a stable key is the easiest hardening step:
-      #   - Only people you share the key with can make write calls from outside
-      #     the browser UI (e.g. from scripts or external integrations)
+      # Setting a stable key has two practical benefits:
       #   - The key survives container restarts without changing
+      #   - External callers (scripts, curl) can't guess a random 32-byte hex
+      # Note: setting API_KEY does NOT hide the key from someone who can load
+      # the app — it is still injected into the page source. The real security
+      # boundary is the network: keep port 3001 off the public internet.
       # Generate one with: openssl rand -hex 32
       - API_KEY=
       # Set BASE_PATH if serving under a sub-path e.g. /liverun

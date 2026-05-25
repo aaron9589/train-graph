@@ -215,9 +215,9 @@ Because the key is embedded in the page source, anyone who can load the app can 
 - LiveRun is designed for **trusted local networks**, not public internet exposure.
 - Even if someone did make an unwanted write, the damage is limited: **timetables can be exported and re-imported as JSON**, so any accidental or malicious change is trivially reversible. Export your timetables before a session as a backup, and you can restore to any previous state in seconds.
 
-### The easiest hardening step: set a persistent API key
+### Setting a persistent API key
 
-By default a new random key is generated every restart. Setting a stable key in `docker-compose.yml` is the simplest way to add a meaningful layer of security:
+By default a new random key is generated every restart. You can set a stable key in `docker-compose.yml`:
 
 ```bash
 # generate once
@@ -231,10 +231,11 @@ environment:
   - API_KEY=<paste your key here>
 ```
 
-With a stable key:
-- The key no longer rotates on restart, so browser sessions survive container restarts.
-- Anyone calling the write API from **outside** the browser (scripts, integrations, curl) must supply the correct key — it can't be guessed.
-- Tipping someone off to the key still gives them write access via the UI, so the primary defence remains **don't expose port 3001 to the public internet**.
+A stable key has two practical benefits:
+- Browser sessions survive container restarts (the key no longer changes on reboot).
+- External callers using the write API from outside the browser (scripts, curl, integrations) must supply the correct key — a 32-byte random hex can't be guessed.
+
+> **Important:** setting `API_KEY` does *not* prevent someone who can load the app from reading the key — it is still injected into the page source. The real security boundary is the network: **keep port 3001 off the public internet**. If you're on a home LAN or club network, that binding to `127.0.0.1` in `docker-compose.yml` is your primary protection.
 
 ---
 
