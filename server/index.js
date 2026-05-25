@@ -2,8 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
 const { readDB, writeDB, getTimetable, mutateTimetable, uuidv4 } = require('./db');
 const openApiSpec = require('./openapi');
@@ -15,19 +13,6 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 // image works whether the reverse proxy rewrites the path or not.
 const BASE_PATH = (process.env.BASE_PATH || '').replace(/\/+$/, '');
 
-// ── API key ──────────────────────────────────────────────────
-// Set API_KEY in the environment to use a fixed key.
-// If unset, a random key is generated each startup and printed to the log.
-const API_KEY = process.env.API_KEY || (() => {
-  const generated = crypto.randomUUID();
-  console.log('\n┌─────────────────────────────────────────────────────┐');
-  console.log('│  No API_KEY set — using auto-generated key:         │');
-  console.log(`│  ${generated}  │`);
-  console.log('│  Set API_KEY env var to make this persistent.        │');
-  console.log('└─────────────────────────────────────────────────────┘\n');
-  return generated;
-})();
-
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || null;
 app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
@@ -35,19 +20,6 @@ app.use(express.json({ limit: '1mb' }));
 
 // 200 requests per minute across all API routes
 app.use('/api', rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false }));
-
-// Require X-API-Key on all mutating API calls (POST/PUT/DELETE).
-// GET/HEAD/OPTIONS remain open so read-only clients and live endpoints work unauthenticated.
-app.use('/api', (req, res, next) => {
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
-    return next();
-  }
-  const provided = req.headers['x-api-key'];
-  if (!provided || provided !== API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized: valid X-API-Key header required' });
-  }
-  next();
-});
 
 if (BASE_PATH) {
   app.use((req, _res, next) => {
@@ -59,8 +31,7 @@ if (BASE_PATH) {
 }
 
 if (process.env.NODE_ENV === 'production') {
-  // Serve static assets but skip index.html — the catch-all below injects the API key into it.
-  app.use(express.static(path.join(__dirname, '../client/dist'), { index: false }));
+  app.use(express.static(path.join(__dirname, '../client/dist')));
 }
 
 const DEFAULT_SETTINGS = {
@@ -846,23 +817,8 @@ app.get('/api/docs', (_req, res) => {
 });
 
 if (process.env.NODE_ENV === 'production') {
-  // Inject the API key into index.html as window.__API_KEY__ so the browser
-  // client can send it with every mutating request without extra configuration.
-  //
-  // Trade-off: the key is visible in the page source to anyone who can load
-  // the app. For this single-user/small-team tool that is an acceptable
-  // compromise — the app is intended to run behind a firewall, not exposed to
-  // the public internet. And because timetables can be exported and re-imported
-  // as JSON, any malicious mutation is trivially reversible: export before an
-  // operation session, import if anything goes wrong.
-  const rawIndexHtml = fs.readFileSync(path.join(__dirname, '../client/dist', 'index.html'), 'utf8');
-  const injectedIndexHtml = rawIndexHtml.replace(
-    '<head>',
-    `<head><script>window.__API_KEY__=${JSON.stringify(API_KEY)}</script>`
-  );
   app.get('*', (_req, res) => {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(injectedIndexHtml);
+    res.sendFile(path.join(__dirname, '../client/dist', 'index.html'));
   });
 }
 

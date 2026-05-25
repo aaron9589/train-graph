@@ -11,25 +11,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      # API key required for all write operations (POST/PUT/DELETE).
-      # The key is injected into index.html at runtime so the browser picks it up
-      # automatically — no manual configuration needed for normal use.
-      #
-      # Note: because the key is embedded in the page source, anyone who can
-      # load the app can technically read it. For a single-server deployment
-      # behind a firewall this is an acceptable trade-off. The main protection
-      # is network-level (don't expose port 3001 to the public internet).
-      # And since timetables can be exported and re-imported as JSON, any
-      # accidental or malicious write operation is trivially reversible.
-      #
-      # Setting a stable key has two practical benefits:
-      #   - The key survives container restarts without changing
-      #   - External callers (scripts, curl) can't guess a random 32-byte hex
-      # Note: setting API_KEY does NOT hide the key from someone who can load
-      # the app — it is still injected into the page source. The real security
-      # boundary is the network: keep port 3001 off the public internet.
-      # Generate one with: openssl rand -hex 32
-      - API_KEY=
       # Set BASE_PATH if serving under a sub-path e.g. /liverun
       # Leave unset (or empty) for root / subdomain deployments
       # - BASE_PATH=/liverun

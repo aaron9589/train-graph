@@ -11,18 +11,11 @@ import type {
 // the page URL — works correctly whether the app is at '/' or '/traingraph/'.
 const BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '') + '/api';
 
-// The server injects window.__API_KEY__ into index.html at runtime in production.
-declare global {
-  interface Window { __API_KEY__?: string; }
-}
-
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const apiKey = typeof window !== 'undefined' ? window.__API_KEY__ : undefined;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
       ...init?.headers,
     },
   });

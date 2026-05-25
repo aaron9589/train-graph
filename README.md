@@ -202,40 +202,17 @@ Exporting via the sidebar generates two files:
 
 ## Security
 
-LiveRun uses an **API key** to protect write operations (`POST` / `PUT` / `DELETE`). Read-only endpoints — including all live API routes — remain open so guard panels and external displays work without configuration.
+LiveRun has no in-app authentication. It is designed for **trusted local networks** — home layouts and club rooms — not public internet exposure.
 
-### How the key works
+### How it is secured
 
-The key is injected into `index.html` at startup so the browser picks it up automatically. You don't need to do anything for normal use — just open the app and start planning.
+- **Network isolation** — the port is bound to `127.0.0.1` in `docker-compose.yml`, so it is only reachable from the machine it runs on or via a reverse proxy you control. This is the primary protection.
+- **Security headers** — Helmet sets `X-Frame-Options`, `X-Content-Type-Options`, HSTS, and other standard hardening headers on every response.
+- **Rate limiting** — API routes are capped at 200 requests per minute to blunt automated abuse.
 
-### The trade-off
+### Recoverability
 
-Because the key is embedded in the page source, anyone who can load the app can read it. For a deployment behind a home router or club LAN this is an acceptable compromise:
-
-- LiveRun is designed for **trusted local networks**, not public internet exposure.
-- Even if someone did make an unwanted write, the damage is limited: **timetables can be exported and re-imported as JSON**, so any accidental or malicious change is trivially reversible. Export your timetables before a session as a backup, and you can restore to any previous state in seconds.
-
-### Setting a persistent API key
-
-By default a new random key is generated every restart. You can set a stable key in `docker-compose.yml`:
-
-```bash
-# generate once
-openssl rand -hex 32
-```
-
-Then paste the result into `docker-compose.yml`:
-
-```yaml
-environment:
-  - API_KEY=<paste your key here>
-```
-
-A stable key has two practical benefits:
-- Browser sessions survive container restarts (the key no longer changes on reboot).
-- External callers using the write API from outside the browser (scripts, curl, integrations) must supply the correct key — a 32-byte random hex can't be guessed.
-
-> **Important:** setting `API_KEY` does *not* prevent someone who can load the app from reading the key — it is still injected into the page source. The real security boundary is the network: **keep port 3001 off the public internet**. If you're on a home LAN or club network, that binding to `127.0.0.1` in `docker-compose.yml` is your primary protection.
+Even in the unlikely event that someone on the LAN makes an unwanted change, the damage is limited. **Timetables can be exported and re-imported as JSON** — export your timetables before a session as a backup and you can restore to any previous state in seconds.
 
 ---
 
