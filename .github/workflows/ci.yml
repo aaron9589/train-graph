@@ -20,7 +20,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        # npm ci skips optional platform-specific packages not recorded in the
+        # lockfile (e.g. @rollup/rollup-linux-x64-gnu on macOS-generated lockfiles),
+        # causing Rollup to fail at build time. npm install respects the lockfile
+        # for all pinned deps but correctly resolves optional platform packages.
+        run: npm install
 
       - name: Typecheck & build client
         run: npm run build --workspace=client
