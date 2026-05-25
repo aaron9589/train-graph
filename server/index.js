@@ -846,8 +846,15 @@ app.get('/api/docs', (_req, res) => {
 });
 
 if (process.env.NODE_ENV === 'production') {
-  // Inject the API key into index.html as window.__API_KEY__ so the client
-  // can send it with every mutating request without extra configuration.
+  // Inject the API key into index.html as window.__API_KEY__ so the browser
+  // client can send it with every mutating request without extra configuration.
+  //
+  // Trade-off: the key is visible in the page source to anyone who can load
+  // the app. For this single-user/small-team tool that is an acceptable
+  // compromise — the app is intended to run behind a firewall, not exposed to
+  // the public internet. And because timetables can be exported and re-imported
+  // as JSON, any malicious mutation is trivially reversible: export before an
+  // operation session, import if anything goes wrong.
   const rawIndexHtml = fs.readFileSync(path.join(__dirname, '../client/dist', 'index.html'), 'utf8');
   const injectedIndexHtml = rawIndexHtml.replace(
     '<head>',

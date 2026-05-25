@@ -12,8 +12,21 @@ services:
       - NODE_ENV=production
       - PORT=3001
       # API key required for all write operations (POST/PUT/DELETE).
-      # If unset, a random key is generated each restart and printed to the container log.
-      # Generate a stable key with: openssl rand -hex 32
+      # The key is injected into index.html at runtime so the browser picks it up
+      # automatically — no manual configuration needed for normal use.
+      #
+      # Note: because the key is embedded in the page source, anyone who can
+      # load the app can technically read it. For a single-server deployment
+      # behind a firewall this is an acceptable trade-off. The main protection
+      # is network-level (don't expose port 3001 to the public internet).
+      # And since timetables can be exported and re-imported as JSON, any
+      # accidental or malicious write operation is trivially reversible.
+      #
+      # That said, setting a stable key is the easiest hardening step:
+      #   - Only people you share the key with can make write calls from outside
+      #     the browser UI (e.g. from scripts or external integrations)
+      #   - The key survives container restarts without changing
+      # Generate one with: openssl rand -hex 32
       - API_KEY=
       # Set BASE_PATH if serving under a sub-path e.g. /liverun
       # Leave unset (or empty) for root / subdomain deployments

@@ -200,6 +200,44 @@ Exporting via the sidebar generates two files:
 
 ---
 
+## Security
+
+LiveRun uses an **API key** to protect write operations (`POST` / `PUT` / `DELETE`). Read-only endpoints — including all live API routes — remain open so guard panels and external displays work without configuration.
+
+### How the key works
+
+The key is injected into `index.html` at startup so the browser picks it up automatically. You don't need to do anything for normal use — just open the app and start planning.
+
+### The trade-off
+
+Because the key is embedded in the page source, anyone who can load the app can read it. For a deployment behind a home router or club LAN this is an acceptable compromise:
+
+- LiveRun is designed for **trusted local networks**, not public internet exposure.
+- Even if someone did make an unwanted write, the damage is limited: **timetables can be exported and re-imported as JSON**, so any accidental or malicious change is trivially reversible. Export your timetables before a session as a backup, and you can restore to any previous state in seconds.
+
+### The easiest hardening step: set a persistent API key
+
+By default a new random key is generated every restart. Setting a stable key in `docker-compose.yml` is the simplest way to add a meaningful layer of security:
+
+```bash
+# generate once
+openssl rand -hex 32
+```
+
+Then paste the result into `docker-compose.yml`:
+
+```yaml
+environment:
+  - API_KEY=<paste your key here>
+```
+
+With a stable key:
+- The key no longer rotates on restart, so browser sessions survive container restarts.
+- Anyone calling the write API from **outside** the browser (scripts, integrations, curl) must supply the correct key — it can't be guessed.
+- Tipping someone off to the key still gives them write access via the UI, so the primary defence remains **don't expose port 3001 to the public internet**.
+
+---
+
 ## Live Timetable API
 
 A read-only REST API for connecting guard panels, JMRI displays, and operator apps to the active session. Full endpoint reference is available at **`/api/docs`** when the app is running.
