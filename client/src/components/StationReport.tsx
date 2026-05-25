@@ -48,10 +48,12 @@ function buildPrintHtml(
         const name = `${row.trainName} ${serviceTag(row.serviceType)}`;
         const instr = row.specialInstructions ? `! ${row.specialInstructions}` : '';
         const rowStyle = i % 2 === 0 ? 'background-color:#f7f7e6;' : 'background-color:#ffffff;';
+        const arrCell = row.serviceType !== 'originates' ? timeLabel(row.arrival) : '';
+        const depCell = row.serviceType !== 'terminates' ? timeLabel(row.departure) : '';
         return `<tr style="${rowStyle}">
           <td>${name}</td>
-          <td style="text-align:center;">${timeLabel(row.arrival)}</td>
-          <td style="text-align:center;">${timeLabel(row.departure)}</td>
+          <td style="text-align:center;">${arrCell}</td>
+          <td style="text-align:center;">${depCell}</td>
           <td>${row.trainNotes || ''}</td>
           <td>${instr}</td>
         </tr>`;
@@ -215,10 +217,10 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
 
                       </td>
                       <td className="py-3 pr-4 font-mono text-slate-300 whitespace-nowrap">
-                        {timeLabel(row.arrival)}
+                        {row.serviceType !== 'originates' ? timeLabel(row.arrival) : ''}
                       </td>
                       <td className="py-3 pr-4 font-mono text-slate-300 whitespace-nowrap">
-                        {timeLabel(row.departure)}
+                        {row.serviceType !== 'terminates' ? timeLabel(row.departure) : ''}
                       </td>
                       <td className="py-3 pr-4 text-slate-300 text-xs">
                         {row.trainNotes || <span className="text-slate-600">—</span>}

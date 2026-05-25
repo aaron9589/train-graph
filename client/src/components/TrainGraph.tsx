@@ -357,6 +357,7 @@ export function TrainGraph({
       <div className="flex-1 relative">
         <svg
           ref={svgRef}
+          id="train-graph-svg"
           width={size.w}
           height={svgH}
           className="absolute inset-0"

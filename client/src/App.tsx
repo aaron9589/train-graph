@@ -11,6 +11,152 @@ import { TrainEditor } from './components/TrainEditor';
 import { PathEditor } from './components/PathEditor';
 import { StationReport } from './components/StationReport';
 
+// ─── Print helpers ────────────────────────────────────────────────────────────
+
+function buildFullTimetableHtml(timetable: Timetable): string {
+  const stations = [...timetable.stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
+  const trains = [...timetable.trains].sort((a, b) => {
+    const firstTime = (t: Train) =>
+      t.stops.reduce((min, s) => {
+        const tm = s.departure ?? s.arrival;
+        return tm ? Math.min(min, timeToMinutes(tm)) : min;
+      }, Infinity);
+    return firstTime(a) - firstTime(b);
+  });
+
+  // Dynamically fit trains per page based on A4 landscape printable width.
+  // Estimates column widths using 8pt Arial character metrics at 96 dpi.
+  const PX_PER_CHAR = 5.5; // 8pt Arial average glyph width
+  const CELL_PAD = 10;     // 5px padding each side
+  const PAGE_W = 1085;     // A4 landscape minus 0.5cm margins at 96 dpi
+
+  const longestStationLen = stations.reduce(
+    (max, s) => Math.max(max, s.name.length + (s.short_code ? 1 + s.short_code.length : 0)),
+    7 // minimum: "Station" header
+  );
+  const stationColW = Math.min(longestStationLen * PX_PER_CHAR + CELL_PAD, 110);
+
+  const trainColW = (t: Train) => {
+    const hasBoth = t.stops.some(s => s.arrival && s.departure && s.arrival !== s.departure);
+    return Math.max(t.name.length, hasBoth ? 11 : 5) * PX_PER_CHAR + CELL_PAD;
+  };
+
+  // Greedily pack trains until the estimated row width would exceed the page
+  const pages: Train[][] = [];
+  let idx = 0;
+  while (idx < trains.length) {
+    let usedW = stationColW;
+    let end = idx;
+    while (end < trains.length) {
+      const cw = trainColW(trains[end]);
+      if (usedW + cw > PAGE_W && end > idx) break;
+      usedW += cw;
+      end++;
+    }
+    pages.push(trains.slice(idx, end));
+    idx = end;
+  }
+  if (pages.length === 0) pages.push([]);
+
+  function buildTable(pageTrains: Train[], pageIndex: number): string {
+    const isLast = pageIndex === pages.length - 1;
+
+    // Precompute the first (origin) station ID for each train
+    const originStationId = new Map<string, string>();
+    for (const t of pageTrains) {
+      let minMins = Infinity;
+      let originId: string | null = null;
+      for (const s of t.stops) {
+        const tm = s.departure ?? s.arrival;
+        if (tm) {
+          const mins = timeToMinutes(tm);
+          if (mins < minMins) { minMins = mins; originId = s.station_id; }
+        }
+      }
+      if (originId) originStationId.set(t.id, originId);
+    }
+
+    const headerCells = pageTrains
+      .map(
+        (t) =>
+          `<th style="text-align:center;white-space:nowrap;border-bottom:2px solid ${t.color};">${t.name}</th>`
+      )
+      .join('');
+
+    const bodyRows = stations
+      .map((station, si) => {
+        const rowBg = si % 2 === 0 ? 'background-color:#f7f7e6;' : 'background-color:#ffffff;';
+        const cells = pageTrains
+          .map((train) => {
+            const stop = train.stops.find((s) => s.station_id === station.id);
+            if (!stop) return `<td style="${rowBg}">&#8203;</td>`;
+            let content: string;
+            if (stop.arrival && stop.departure && stop.arrival !== stop.departure) {
+              content = `${stop.arrival}&#8202;/&#8202;${stop.departure}`;
+            } else {
+              content = stop.arrival ?? stop.departure ?? '';
+            }
+            const isOrigin = originStationId.get(train.id) === station.id;
+            const cellStyle = `${rowBg}text-align:center;${isOrigin ? 'font-weight:bold;' : ''}`;
+            return `<td style="${cellStyle}">${content}</td>`;
+          })
+          .join('');
+        const shortCode = station.short_code
+          ? ` <span style="font-weight:normal;color:#666;">${station.short_code}</span>`
+          : '';
+        return `<tr><td style="${rowBg}font-weight:bold;">${station.name}${shortCode}</td>${cells}</tr>`;
+      })
+      .join('');
+
+    const pageLabel = pages.length > 1 ? ` (${pageIndex + 1}/${pages.length})` : '';
+    return `<div style="${isLast ? '' : 'page-break-after:always;'}">
+  <div style="padding-bottom:6px;">
+    <h2>${timetable.name}</h2>
+    <h3>Working Timetable${pageLabel}</h3>
+    <div class="rule"></div>
+    <small>Session: ${timetable.start_time}&#8211;${timetable.end_time} &middot; ${trains.length} train${trains.length !== 1 ? 's' : ''} &middot; ${stations.length} station${stations.length !== 1 ? 's' : ''}</small>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:left;">Station</th>
+        ${headerCells}
+      </tr>
+    </thead>
+    <tbody>${bodyRows}</tbody>
+  </table>
+</div>`;
+  }
+
+  const pagesHtml = pages.map((pageTrains, i) => buildTable(pageTrains, i)).join('\n');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Working Timetable \u2014 ${timetable.name}</title>
+  <style>
+    @page { size: A4 landscape; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; line-height: 1.2; color: #000; background: white; padding: 0.5cm; }
+    h2 { font-size: 9pt; font-weight: bold; line-height: 1.3; }
+    h3 { font-size: 8pt; font-weight: normal; line-height: 1.3; }
+    small { font-size: 7pt; line-height: 1.3; color: #444; }
+    .rule { border-top: 1px solid #999; margin: 3px 0; }
+    table { border-collapse: collapse; table-layout: auto; empty-cells: show; }
+    thead { display: table-header-group; }
+    th { font-size: 7.5pt; font-weight: bold; line-height: 1.2; border: 1px solid #aaa; padding: 2px 5px; white-space: nowrap; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    td { font-size: 8pt; line-height: 1.2; border: 1px solid #aaa; padding: 2px 5px; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    td:first-child, th:first-child { white-space: normal; min-width: 80px; max-width: 110px; }
+    tr { page-break-inside: avoid; }
+  </style>
+</head>
+<body>
+${pagesHtml}
+</body>
+</html>`;
+}
+
 export default function App() {
   const [timetables, setTimetables] = useState<TimetableSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -56,6 +202,7 @@ export default function App() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [viewOffset, setViewOffset] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
 
   // ── Derived view window ────────────────────────────────
   const { viewStart, viewEnd } = useMemo(() => {
@@ -430,6 +577,69 @@ export default function App() {
     }
   }
 
+  // ── Print handlers ──────────────────────────────────────────
+
+  function handlePrintTimetable() {
+    if (!timetable) return;
+    const win = window.open('', '_blank', 'width=1200,height=800');
+    if (!win) return;
+    win.document.write(buildFullTimetableHtml(timetable));
+    win.document.close();
+    win.focus();
+  }
+
+  function handlePrintGraph() {
+    if (!timetable) return;
+    const svg = document.getElementById('train-graph-svg') as SVGSVGElement | null;
+    if (!svg) return;
+    // Clone so we can modify attributes without affecting the live graph
+    const clone = svg.cloneNode(true) as SVGSVGElement;
+    const w = svg.width.baseVal.value;
+    const h = svg.height.baseVal.value;
+    clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    clone.setAttribute('width', '100%');
+    clone.removeAttribute('height');
+    clone.removeAttribute('class');
+    clone.removeAttribute('style');
+
+    // Remap dark SVG palette to print-friendly light equivalents
+    let svgContent = clone.outerHTML;
+    const colorMap: [string, string][] = [
+      ['fill="#0a0f1e"',  'fill="#ffffff"'],    // graph background
+      ['stroke="#1e293b"','stroke="#d1d5db"'],  // minor grid lines + station lines
+      ['stroke="#334155"','stroke="#9ca3af"'],  // major grid lines + border
+      ['fill="#64748b"',  'fill="#374151"'],    // time-axis labels
+      ['fill="#94a3b8"',  'fill="#111827"'],    // station name labels
+      ['fill="#475569"',  'fill="#4b5563"'],    // km labels
+    ];
+    for (const [from, to] of colorMap) {
+      svgContent = svgContent.split(from).join(to);
+    }
+
+    const win = window.open('', '_blank', 'width=1200,height=800');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>${timetable.name} \u2014 Train Graph</title>
+  <style>
+    @page { size: A3 landscape; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #ffffff; color: #111827; font-family: Arial, sans-serif; padding: 0.25in; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    h2 { font-size: 9pt; font-weight: normal; color: #374151; margin-bottom: 6px; }
+    svg { width: 100%; height: auto; display: block; }
+  </style>
+</head>
+<body>
+  <h2>${timetable.name} \u2014 Train Graph</h2>
+  ${svgContent}
+</body>
+</html>`);
+    win.document.close();
+    win.focus();
+  }
+
   // ── Render ───────────────────────────────────────────────────
 
   return (
@@ -544,14 +754,44 @@ export default function App() {
                   </div>
                 )}
                 <span className="text-slate-700 mx-1">|</span>
-                {/* Station report */}
-                <button
-                  onClick={() => setModal({ type: 'stationReport', stationId: timetable.stations[0]?.id ?? null })}
-                  title="Station report"
-                  className="p-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-                >
-                  <ReportIcon />
-                </button>
+                {/* Print menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setPrintMenuOpen((v) => !v)}
+                    title="Print"
+                    className={`p-1.5 rounded transition-colors hover:bg-slate-800 ${printMenuOpen ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    <PrintIcon />
+                  </button>
+                  {printMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setPrintMenuOpen(false)} />
+                      <div className="absolute right-0 top-full mt-1 z-20 bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[190px]">
+                        <button
+                          onClick={() => { setPrintMenuOpen(false); setModal({ type: 'stationReport', stationId: timetable.stations[0]?.id ?? null }); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors text-left"
+                        >
+                          <ReportIcon />
+                          Station report
+                        </button>
+                        <button
+                          onClick={() => { setPrintMenuOpen(false); handlePrintTimetable(); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors text-left"
+                        >
+                          <PrintTimetableIcon />
+                          Full timetable
+                        </button>
+                        <button
+                          onClick={() => { setPrintMenuOpen(false); handlePrintGraph(); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors text-left"
+                        >
+                          <PrintGraphIcon />
+                          Train graph
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <span className="text-slate-700 mx-1">|</span>
                 {/* Fast clock indicator */}
                 {timetable.settings?.clock_enabled && (
@@ -711,6 +951,36 @@ function CogIcon() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function PrintIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 6 2 18 2 18 9" />
+      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+      <rect x="6" y="14" width="12" height="8" />
+    </svg>
+  );
+}
+
+function PrintTimetableIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="3" y1="15" x2="21" y2="15" />
+      <line x1="9" y1="9" x2="9" y2="21" />
+    </svg>
+  );
+}
+
+function PrintGraphIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+      <polyline points="17 6 23 6 23 12" />
     </svg>
   );
 }
