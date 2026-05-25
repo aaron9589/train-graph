@@ -20,11 +20,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # npm ci skips optional platform-specific packages not recorded in the
-        # lockfile (e.g. @rollup/rollup-linux-x64-gnu on macOS-generated lockfiles),
-        # causing Rollup to fail at build time. npm install respects the lockfile
-        # for all pinned deps but correctly resolves optional platform packages.
-        run: npm install
+        # npm has a known bug (https://github.com/npm/cli/issues/4828) where
+        # optional platform-specific packages (e.g. @rollup/rollup-linux-x64-gnu)
+        # are not installed when a lockfile generated on a different platform is
+        # present, even with plain npm install. Removing the lockfile first is the
+        # recommended workaround. The npm cache (restored above) still makes this fast.
+        run: rm -f package-lock.json && npm install
 
       - name: Typecheck & build client
         run: npm run build --workspace=client
