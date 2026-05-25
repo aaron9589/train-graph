@@ -206,7 +206,7 @@ LiveRun has no in-app authentication. It is designed for **trusted local network
 
 ### How it is secured
 
-- **Network isolation** — the port is bound to `127.0.0.1` in `docker-compose.yml`, so it is only reachable from the machine it runs on or via a reverse proxy you control. This is the primary protection.
+- **LAN-only exposure** — the app listens on port 3001 and is accessible to any device on your local network. It is not designed to be exposed to the public internet. Don't forward port 3001 on your router.
 - **Security headers** — Helmet sets `X-Frame-Options`, `X-Content-Type-Options`, HSTS, and other standard hardening headers on every response.
 - **Rate limiting** — API routes are capped at 200 requests per minute to blunt automated abuse.
 
