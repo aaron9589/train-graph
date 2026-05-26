@@ -148,6 +148,7 @@ app.post('/api/timetables/import', (req, res) => {
       distance: (s.distance != null && s.distance !== '' && Number.isFinite(Number(s.distance))) ? Number(s.distance) : null,
       graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
       sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
+      branch_name: (s.branch_name && String(s.branch_name).trim()) ? String(s.branch_name).trim() : null,
     })),
     trains: (data.trains || []).map((tr) => {
       const trainId = uuidv4();
@@ -258,6 +259,7 @@ app.post('/api/timetables/:id/restore', (req, res) => {
       distance: (s.distance != null && s.distance !== '' && Number.isFinite(Number(s.distance))) ? Number(s.distance) : null,
       graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
       sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
+      branch_name: (s.branch_name && String(s.branch_name).trim()) ? String(s.branch_name).trim() : null,
     }));
     if (Array.isArray(trains)) tt.trains = trains.map((tr) => ({
       id: String(tr.id),
@@ -324,17 +326,35 @@ app.put('/api/timetables/:id/settings', (req, res) => {
 });
 
 app.post('/api/timetables/:id/stations', (req, res) => {
-  const { name, shortCode, distance, graphPos } = req.body;
+  const { name, shortCode, distance, graphPos, branchName } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (graphPos == null || graphPos === '') return res.status(400).json({ error: 'graphPos is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
+    const newPos = Number(graphPos);
+    const maxExisting = tt.stations.reduce((m, s) => Math.max(m, s.graph_pos ?? 0), -Infinity);
+    // Find the graph_pos of the station immediately below the insertion point
+    const prevPos = tt.stations.reduce((m, s) => {
+      const p = s.graph_pos ?? 0;
+      return (p < newPos && p > m) ? p : m;
+    }, -Infinity);
+    // Ensure at least 1.0-unit gap below the new station. If the user typed a
+    // position too close to the previous one, snap forward to prevPos + 1.0.
+    const effectivePos = (prevPos > -Infinity && newPos - prevPos < 1.0) ? prevPos + 1.0 : newPos;
+    // When inserting midway (not appending), shift everything at or beyond the
+    // effective position up by 1.0 to make room above.
+    if (tt.stations.length > 0 && effectivePos <= maxExisting) {
+      tt.stations.forEach((s) => {
+        if ((s.graph_pos ?? 0) >= effectivePos) s.graph_pos = (s.graph_pos ?? 0) + 1;
+      });
+    }
     const maxOrder = tt.stations.reduce((m, s) => Math.max(m, s.sort_order || 0), -1);
     tt.stations.push({
       id: uuidv4(), timetable_id: req.params.id, name: name.trim(),
       short_code: shortCode || '',
       distance: (distance !== '' && distance != null) ? Number(distance) : null,
-      graph_pos: Number(graphPos),
+      graph_pos: effectivePos,
       sort_order: maxOrder + 1,
+      branch_name: (branchName && String(branchName).trim()) ? String(branchName).trim() : null,
     });
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -342,7 +362,7 @@ app.post('/api/timetables/:id/stations', (req, res) => {
 });
 
 app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
-  const { name, shortCode, distance, graphPos, sortOrder } = req.body;
+  const { name, shortCode, distance, graphPos, sortOrder, branchName } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
     const st = tt.stations.find((s) => s.id === req.params.stationId);
@@ -351,6 +371,7 @@ app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
       st.distance = (distance !== '' && distance != null) ? Number(distance) : null;
       if (graphPos != null && graphPos !== '') st.graph_pos = Number(graphPos);
       st.sort_order = sortOrder != null ? sortOrder : st.sort_order;
+      st.branch_name = (branchName && String(branchName).trim()) ? String(branchName).trim() : null;
     }
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });

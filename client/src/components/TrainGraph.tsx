@@ -6,8 +6,26 @@ import { timeToMinutes, minutesToTime } from '../utils';
 const PAD = { top: 24, right: 24, bottom: 48, left: 140 };
 const MINOR_TICK = 30; // minutes
 const MAJOR_TICK = 60; // minutes
+// Minimum pixels between adjacent station lines. The graph only grows taller
+// than the container (and scrolls) when the tightest gap would otherwise render
+// below this threshold — so simple/sparse timetables always fill the viewport.
+const MIN_STATION_GAP_PX = 18;
+
+// Colour palette for branch groups (cycles if more than 8 branches)
+const BRANCH_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Split a station label into at most two lines at a word boundary. */
+function wrapLabel(text: string, maxChars = 14): [string, string | null] {
+  if (text.length <= maxChars) return [text, null];
+  // Prefer a split at a space near the centre of the string
+  const mid = Math.floor(text.length / 2);
+  let splitAt = text.lastIndexOf(' ', mid + 3);
+  if (splitAt < 1) splitAt = text.indexOf(' ');
+  if (splitAt < 1) return [text.slice(0, maxChars), text.slice(maxChars)];
+  return [text.slice(0, splitAt), text.slice(splitAt + 1)];
+}
 
 interface PlotPoint {
   x: number;
@@ -21,9 +39,8 @@ function buildTrainPoints(
   stationMap: Map<string, { graph_pos: number; name: string }>,
   viewStart: number,
   viewEnd: number,
-  maxPos: number,
+  posToY: (pos: number) => number,
   gw: number,
-  gh: number
 ): PlotPoint[] {
   type StopEntry = { stop: TrainStop; timeMin: number; isArrival: boolean; graphPos: number; stationName: string };
   const entries: StopEntry[] = [];
@@ -45,7 +62,7 @@ function buildTrainPoints(
   // Include all points (SVG clipPath handles boundary clipping)
   return entries.map((e) => ({
     x: PAD.left + ((e.timeMin - viewStart) / range) * gw,
-    y: PAD.top + (maxPos > 0 ? (e.graphPos / maxPos) * gh : 0),
+    y: posToY(e.graphPos),
     minutes: e.timeMin,
     stationName: e.stationName,
   }));
@@ -170,6 +187,7 @@ interface Props {
   timetable: Timetable;
   onTrainClick?: (train: Train) => void;
   labelMode?: 'code' | 'name';
+  distanceUnit?: 'km' | 'mi';
   viewStart?: number;
   viewEnd?: number;
   clockTime?: number | null;
@@ -178,7 +196,7 @@ interface Props {
 }
 
 export function TrainGraph({
-  timetable, onTrainClick, labelMode = 'code',
+  timetable, onTrainClick, labelMode = 'code', distanceUnit = 'km',
   viewStart: viewStartProp, viewEnd: viewEndProp,
   clockTime, onPan, externalHoveredId,
 }: Props) {
@@ -190,7 +208,8 @@ export function TrainGraph({
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   // Ref to stable layout values used in external-hover effect (avoids stale closures)
-  const layoutRef = useRef({ stationMap: new Map<string, { graph_pos: number; name: string }>(), viewStart: 0, viewEnd: 0, maxPos: 1, gw: 0, gh: 0, timetable });
+  const layoutRef = useRef({ stationMap: new Map<string, { graph_pos: number; name: string }>(), viewStart: 0, viewEnd: 0, posToY: (_: number) => PAD.top, gw: 0, timetable });
+  const needsVScrollRef = useRef(false);
 
   // Responsive sizing
   useEffect(() => {
@@ -217,6 +236,8 @@ export function TrainGraph({
     if (!el || !onPan) return;
     const gw = size.w - PAD.left - PAD.right;
     const handler = (e: WheelEvent) => {
+      // When the graph is taller than the viewport, let the browser handle vertical scroll natively
+      if (needsVScrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) return;
       e.preventDefault();
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
       const panMinutes = delta * (viewWidth / gw);
@@ -226,14 +247,45 @@ export function TrainGraph({
     return () => el.removeEventListener('wheel', handler);
   }, [onPan, viewStart, viewWidth, ttStart, ttEnd, size.w]);
 
+  const scrollbarH = isZoomed ? 20 : 0;
   const gw = size.w - PAD.left - PAD.right;
-  const gh = size.h - PAD.top - PAD.bottom - (isZoomed ? 20 : 0);
+  const gh_container = size.h - PAD.top - PAD.bottom - scrollbarH;
 
   const stations = [...timetable.stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
   const maxPos = stations.length > 0 ? Math.max(...stations.map((s) => s.graph_pos ?? 0)) : 1;
+
+  // ─── Branch group helpers ────────────────────────────────────────────────────
+  // Assign a stable colour to each unique branch_name in order of first appearance
+  const branchColorMap = new Map<string, string>();
+  let _branchColorIdx = 0;
+  for (const s of stations) {
+    if (s.branch_name && !branchColorMap.has(s.branch_name)) {
+      branchColorMap.set(s.branch_name, BRANCH_COLORS[_branchColorIdx++ % BRANCH_COLORS.length]);
+    }
+  }
+  // Flat station map used by train-line renderer
   const stationMap = new Map(stations.map((s) => [s.id, { graph_pos: s.graph_pos ?? 0, name: s.name }]));
+
+  // Scale to fill the container. Only grow taller (and scroll) when the tightest
+  // gap between stations would otherwise be too small to read.
+  // Exclude cross-branch-boundary gaps (e.g. main→branch junction) from this
+  // calculation — those are intentionally close and must not inflate the scale.
+  const stationGaps = stations.length > 1
+    ? stations.slice(1).map((s, i) => {
+        const prev = stations[i];
+        if ((prev.branch_name ?? null) !== (s.branch_name ?? null)) return null;
+        return (s.graph_pos ?? 0) - (prev.graph_pos ?? 0);
+      }).filter((g): g is number => g !== null && g > 0)
+    : [];
+  const minGap = stationGaps.length > 0 ? Math.min(...stationGaps) : (maxPos || 1);
+  const pxPerUnit = maxPos > 0 ? Math.max(gh_container / maxPos, MIN_STATION_GAP_PX / minGap) : gh_container;
+  const gh = pxPerUnit * maxPos;
+  const needsVScroll = gh > gh_container + 1;
+  const svgTotalH = needsVScroll ? Math.ceil(gh + PAD.top + PAD.bottom) : size.h - scrollbarH;
+  needsVScrollRef.current = needsVScroll;
+
   // Keep layoutRef current for use in the external-hover effect
-  layoutRef.current = { stationMap, viewStart, viewEnd, maxPos, gw, gh, timetable };
+  layoutRef.current = { stationMap, viewStart, viewEnd, posToY: (pos) => PAD.top + (maxPos > 0 ? (pos / maxPos) * gh : 0), gw, timetable };
 
   // Ticks within view window
   const minorTicks: number[] = [];
@@ -245,10 +297,7 @@ export function TrainGraph({
     (min: number) => PAD.left + ((min - viewStart) / viewWidth) * gw,
     [viewStart, viewWidth, gw]
   );
-  const distToY = useCallback(
-    (pos: number) => PAD.top + (maxPos > 0 ? (pos / maxPos) * gh : 0),
-    [maxPos, gh]
-  );
+  const distToY = (pos: number) => PAD.top + (maxPos > 0 ? (pos / maxPos) * gh : 0);
 
   const handleMouseLeave = () => { setTooltip(null); setHoveredId(null); };
 
@@ -258,10 +307,10 @@ export function TrainGraph({
       if (!hoveredId) setTooltip(null);
       return;
     }
-    const { stationMap, viewStart, viewEnd, maxPos, gw, gh, timetable } = layoutRef.current;
+    const { stationMap, viewStart, viewEnd, posToY, gw, timetable } = layoutRef.current;
     const train = timetable.trains.find((t) => t.id === externalHoveredId);
     if (!train || !svgRef.current) return;
-    const points = buildTrainPoints(train, stationMap, viewStart, viewEnd, maxPos, gw, gh);
+    const points = buildTrainPoints(train, stationMap, viewStart, viewEnd, posToY, gw);
     const inView = points.filter((p) => p.minutes >= viewStart && p.minutes <= viewEnd);
     if (inView.length === 0) return;
     const svgRect = svgRef.current.getBoundingClientRect();
@@ -350,17 +399,19 @@ export function TrainGraph({
   const isEmpty = stations.length === 0;
   const noTrains = timetable.trains.length === 0;
   const clockInView = clockTime != null && clockTime >= viewStart && clockTime <= viewEnd;
-  const svgH = size.h - (isZoomed ? 20 : 0);
 
   return (
     <div ref={containerRef} className="w-full h-full flex flex-col select-none overflow-hidden">
-      <div className="flex-1 relative">
+      <div
+        className="flex-1 relative overflow-x-hidden"
+        style={{ overflowY: needsVScroll ? 'auto' : 'hidden' }}
+      >
         <svg
           ref={svgRef}
           id="train-graph-svg"
           width={size.w}
-          height={svgH}
-          className="absolute inset-0"
+          height={svgTotalH}
+          style={{ display: 'block' }}
           onMouseLeave={handleMouseLeave}
         >
           <defs>
@@ -377,39 +428,97 @@ export function TrainGraph({
             <line key={`minor-${min}`} x1={timeToX(min)} y1={PAD.top} x2={timeToX(min)} y2={PAD.top + gh} stroke="#1e293b" strokeWidth="1" />
           ))}
 
-          {/* Major grid lines + labels */}
+          {/* Major grid lines + labels (top + bottom so time is readable when scrolled) */}
           {majorTicks.map((min) => {
             const x = timeToX(min);
             return (
               <g key={`major-${min}`}>
                 <line x1={x} y1={PAD.top} x2={x} y2={PAD.top + gh} stroke="#334155" strokeWidth="1" />
-                <text x={x} y={PAD.top + gh + 18} textAnchor="middle" fill="#64748b" fontSize="11" fontFamily="monospace">
+                <text x={x} y={PAD.top - 6} textAnchor="middle" fill="#64748b" fontSize="11" fontFamily="monospace">
                   {minutesToTime(min)}
                 </text>
+                {needsVScroll && (
+                  <text x={x} y={PAD.top + gh + 18} textAnchor="middle" fill="#64748b" fontSize="11" fontFamily="monospace">
+                    {minutesToTime(min)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Branch shading bands — full-width tinted rects drawn under station lines */}
+          {Array.from(branchColorMap.entries()).map(([bn, color]) => {
+            const members = stations.filter((s) => s.branch_name === bn);
+            if (members.length === 0) return null;
+            const yTop = distToY(Math.min(...members.map((s) => s.graph_pos ?? 0)));
+            const yBot = distToY(Math.max(...members.map((s) => s.graph_pos ?? 0)));
+            const vPad = 10;
+            return (
+              <g key={`shade-${bn}`}>
+                <rect x={PAD.left} y={yTop - vPad} width={gw} height={yBot - yTop + vPad * 2} fill={color + '1a'} />
+                <line x1={PAD.left} y1={yTop - vPad} x2={PAD.left + gw} y2={yTop - vPad} stroke={color} strokeWidth="0.75" strokeOpacity="0.35" />
+                <line x1={PAD.left} y1={yBot + vPad} x2={PAD.left + gw} y2={yBot + vPad} stroke={color} strokeWidth="0.75" strokeOpacity="0.35" />
+                <text x={PAD.left + 5} y={yTop - vPad + 10} fill={color} fontSize="9" fontFamily="system-ui, sans-serif" fontWeight="600" opacity="0.65">{bn}</text>
               </g>
             );
           })}
 
           {/* Station lines & labels */}
-          {stations.map((station) => {
-            const y = distToY(station.graph_pos ?? 0);
-            const kmLabel = station.distance != null ? `${station.distance}km` : null;
-            return (
-              <g key={station.id}>
-                <line
-                  x1={PAD.left} y1={y} x2={PAD.left + gw} y2={y}
-                  stroke="#1e293b" strokeWidth="1"
-                  strokeDasharray={(station.graph_pos ?? 0) === 0 ? 'none' : '4 4'}
-                />
-                <text x={PAD.left - 8} y={kmLabel ? y + 4 : y + 5} textAnchor="end" fill="#94a3b8" fontSize="12" fontFamily="system-ui, sans-serif">
-                  {labelMode === 'code' ? (station.short_code || station.name) : station.name}
-                </text>
-                {kmLabel && (
-                  <text x={PAD.left - 8} y={y + 16} textAnchor="end" fill="#475569" fontSize="10" fontFamily="monospace">{kmLabel}</text>
-                )}
-              </g>
-            );
-          })}
+          {(() => {
+            let lastLabelY = -Infinity;
+            const firstBranchStationShown = new Set<string>();
+            const elements: React.ReactNode[] = [];
+
+            for (const station of stations) {
+              const y = distToY(station.graph_pos ?? 0);
+              const branchName = station.branch_name ?? null;
+              const branchColor = branchName ? (branchColorMap.get(branchName) ?? '#64748b') : null;
+
+              // Always show label for first station in a branch regardless of proximity
+              const isFirstBranchStation = branchName !== null && !firstBranchStationShown.has(branchName);
+              if (isFirstBranchStation) firstBranchStationShown.add(branchName);
+
+              const kmLabel = station.distance != null ? `${station.distance}${distanceUnit}` : null;
+              const rowH = kmLabel ? 20 : 16;
+              const showLabel = isFirstBranchStation || (y - lastLabelY >= 14);
+              if (showLabel) lastLabelY = y + rowH;
+
+              elements.push(
+                <g key={station.id}>
+                  {branchColor && (
+                    <line x1={PAD.left - 3} y1={y - 5} x2={PAD.left - 3} y2={y + 5} stroke={branchColor} strokeWidth="2" strokeLinecap="round" />
+                  )}
+                  <line
+                    x1={PAD.left} y1={y} x2={PAD.left + gw} y2={y}
+                    stroke={branchColor ? branchColor + '55' : '#1e293b'} strokeWidth="1"
+                    strokeDasharray={(station.graph_pos ?? 0) === 0 ? 'none' : '4 4'}
+                  />
+                  {showLabel && (() => {
+                    const rawLabel = labelMode === 'code' ? (station.short_code || station.name) : station.name;
+                    const [line1, line2] = wrapLabel(rawLabel);
+                    const nameY1 = line2 ? y - 1  : (kmLabel ? y + 4 : y + 5);
+                    const nameY2 = line2 ? y + 11 : null;
+                    const distY  = line2 ? y + 23 : y + 16;
+                    const lx = PAD.left - 8;
+                    const labelFill = branchColor ? '#788494' : '#94a3b8';
+                    return (
+                      <>
+                        <text x={lx} textAnchor="end" fill={labelFill} fontSize="12" fontFamily="system-ui, sans-serif">
+                          <tspan x={lx} y={nameY1}>{line1}</tspan>
+                          {nameY2 && <tspan x={lx} y={nameY2}>{line2}</tspan>}
+                        </text>
+                        {kmLabel && (
+                          <text x={lx} y={distY} textAnchor="end" fill="#475569" fontSize="10" fontFamily="monospace">{kmLabel}</text>
+                        )}
+                      </>
+                    );
+                  })()}
+                </g>
+              );
+            }
+
+            return elements;
+          })()}
 
           {/* Graph border */}
           <rect x={PAD.left} y={PAD.top} width={gw} height={gh} fill="none" stroke="#334155" strokeWidth="1" />
@@ -417,7 +526,7 @@ export function TrainGraph({
           {/* Train paths — clipped */}
           <g clipPath="url(#graphClip)">
             {timetable.trains.map((train) => {
-              const points = buildTrainPoints(train, stationMap, viewStart, viewEnd, maxPos, gw, gh);
+              const points = buildTrainPoints(train, stationMap, viewStart, viewEnd, distToY, gw);
               if (points.length < 2) return null;
               const ptStr = points.map((p) => `${p.x},${p.y}`).join(' ');
               const isHovered = effectiveHoveredId === train.id;
@@ -454,7 +563,7 @@ export function TrainGraph({
           <text x={16} y={PAD.top + gh / 2} textAnchor="middle" fill="#475569" fontSize="11" fontFamily="system-ui, sans-serif" transform={`rotate(-90, 16, ${PAD.top + gh / 2})`}>Stations</text>
 
           {/* X-axis label */}
-          <text x={PAD.left + gw / 2} y={svgH - 4} textAnchor="middle" fill="#475569" fontSize="11" fontFamily="system-ui, sans-serif">Time</text>
+          <text x={PAD.left + gw / 2} y={svgTotalH - 4} textAnchor="middle" fill="#475569" fontSize="11" fontFamily="system-ui, sans-serif">Time</text>
         </svg>
 
         {isEmpty && (

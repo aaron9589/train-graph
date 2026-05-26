@@ -89,7 +89,7 @@ export const api = {
 
   addStation: (
     timetableId: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName?: string | null }
   ) =>
     req<Timetable>(`/timetables/${timetableId}/stations`, {
       method: 'POST',
@@ -99,7 +99,7 @@ export const api = {
   updateStation: (
     timetableId: string,
     stationId: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null }
   ) =>
     req<Timetable>(`/timetables/${timetableId}/stations/${stationId}`, {
       method: 'PUT',

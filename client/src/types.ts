@@ -21,6 +21,9 @@ export interface Station {
   /** Y-axis position on the graph (layout units, independent of real km). */
   graph_pos: number;
   sort_order: number;
+  /** Optional branch name. Stations sharing a branch_name are grouped and
+   *  shown indented on the graph with a collapse/expand toggle. */
+  branch_name: string | null;
 }
 
 export interface TrainStop {

@@ -17,6 +17,7 @@ interface Props {
   paths: Path[];
   crews?: Crew[];
   existingColors?: string[];
+  distanceUnit?: 'km' | 'mi';
   onDraftChange: (draft: Train) => void;
   onSave: (data: TrainRequest) => void;
   onDelete?: () => void;
@@ -46,7 +47,7 @@ const PRESET_COLORS = [
   '#c084fc', // purple-400 (soft purple)
 ];
 
-export function TrainEditor({ train, stations, paths, crews = [], existingColors, onDraftChange, onSave, onDelete, onClose }: Props) {
+export function TrainEditor({ train, stations, paths, crews = [], existingColors, distanceUnit = 'km', onDraftChange, onSave, onDelete, onClose }: Props) {
   const sorted = [...stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
   // Keep original stops around so we can restore all-stations view if path is deselected
   const trainStopsRef = useRef(train?.stops);
@@ -213,9 +214,14 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
         const ps = pathStops[i];
         if (!ps) break;
         const arrival = addMinutes(prevDep, ps.travel_time_from_prev);
-        const departure = addMinutes(arrival, ps.dwell_time);
-        next[i] = { ...next[i], arrival, departure };
-        prevDep = departure;
+        // Last stop is arrival-only — no departure or dwell
+        if (i === next.length - 1) {
+          next[i] = { ...next[i], arrival, departure: '', dwell: '' };
+        } else {
+          const departure = addMinutes(arrival, ps.dwell_time);
+          next[i] = { ...next[i], arrival, departure };
+          prevDep = departure;
+        }
       }
       return next;
     });
@@ -233,17 +239,29 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
     }
     setError('');
 
-    const saveStops = stops
-      .filter((s) => s.arrival || s.departure)
-      .map((s) => ({
+    const timedStops = stops.filter((s) => s.arrival || s.departure);
+    const firstTimedId = timedStops[0]?.stationId;
+    const lastTimedId = timedStops[timedStops.length - 1]?.stationId;
+    const saveStops = timedStops.map((s) => ({
         stationId: s.stationId,
-        arrival: s.arrival || null,
-        departure: s.departure || null,
+        // First timed stop departs only; last timed stop arrives only
+        arrival: s.stationId === firstTimedId ? null : (s.arrival || null),
+        departure: s.stationId === lastTimedId ? null : (s.departure || null),
         specialInstructions: s.specialInstructions || undefined,
       }));
 
     onSave({ id: train?.id, name: name.trim(), color, notes, trainType, trainId: trainIdField, direction, crewId: crewId || undefined, stops: saveStops });
   }
+
+  // Derived: which rows get the arrival-only / departure-only treatment.
+  // Applied only when there are at least 2 timed stops so a single-stop train
+  // isn't left with no editable time inputs.
+  const timedIndices = stops.reduce<number[]>((acc, s, i) => {
+    if (s.arrival || s.departure) acc.push(i);
+    return acc;
+  }, []);
+  const firstTimedIdx = timedIndices.length >= 2 ? timedIndices[0] : -1;
+  const lastTimedIdx  = timedIndices.length >= 2 ? timedIndices[timedIndices.length - 1] : -1;
 
   return (
     <>
@@ -451,41 +469,53 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
                     {/* Station cell */}
                     <div className="px-3 py-2 flex flex-col justify-center">
                       <span className="text-sm text-slate-300">{stop.stationName}</span>
-                      <span className="text-xs text-slate-600">{stop.distance != null ? `${stop.distance} km` : ''}</span>
+                      <span className="text-xs text-slate-600">{stop.distance != null ? `${stop.distance} ${distanceUnit ?? 'km'}` : ''}</span>
                     </div>
 
-                    {/* Arrival */}
+                    {/* Arrival — hidden for first timed stop (departure only) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      <input
-                        type="time"
-                        value={stop.arrival}
-                        onChange={(e) => updateStop(idx, 'arrival', e.target.value)}
-                        onBlur={() => inferDeparture(idx)}
-                        className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
-                      />
+                      {idx === firstTimedIdx ? (
+                        <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="First stop is departure only">—</span>
+                      ) : (
+                        <input
+                          type="time"
+                          value={stop.arrival}
+                          onChange={(e) => updateStop(idx, 'arrival', e.target.value)}
+                          onBlur={() => inferDeparture(idx)}
+                          className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
+                        />
+                      )}
                     </div>
 
-                    {/* Departure */}
+                    {/* Departure — hidden for last timed stop (arrival only) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      <input
-                        type="time"
-                        value={stop.departure}
-                        onChange={(e) => updateStop(idx, 'departure', e.target.value)}
-                        className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
-                      />
+                      {idx === lastTimedIdx ? (
+                        <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="Last stop is arrival only">—</span>
+                      ) : (
+                        <input
+                          type="time"
+                          value={stop.departure}
+                          onChange={(e) => updateStop(idx, 'departure', e.target.value)}
+                          className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
+                        />
+                      )}
                     </div>
 
-                    {/* Dwell */}
+                    {/* Dwell — hidden for last stop (no departure to compute against) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={stop.dwell}
-                        onChange={(e) => updateStop(idx, 'dwell', e.target.value)}
-                        placeholder="min"
-                        title="Dwell time in minutes"
-                        className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded text-center placeholder:text-slate-600"
-                      />
+                      {idx === lastTimedIdx ? (
+                        <span className="w-full" />
+                      ) : (
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={stop.dwell}
+                          onChange={(e) => updateStop(idx, 'dwell', e.target.value)}
+                          placeholder="min"
+                          title="Dwell time in minutes"
+                          className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded text-center placeholder:text-slate-600"
+                        />
+                      )}
                     </div>
                     </div>
 

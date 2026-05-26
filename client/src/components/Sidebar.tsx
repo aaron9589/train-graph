@@ -15,8 +15,8 @@ interface Props {
   onDeleteTimetable: (id: string) => void;
   onDuplicateTimetable: (id: string) => void;
   onSetActiveTimetable: (id: string | null) => void;
-  onAddStation: (data: { name: string; shortCode: string; distance: number | null; graphPos: number }) => void;
-  onUpdateStation: (id: string, data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }) => void;
+  onAddStation: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName?: string | null }) => void;
+  onUpdateStation: (id: string, data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null }) => void;
   onDeleteStation: (id: string) => void;
   onNewPath: () => void;
   onEditPath: (path: Path) => void;
@@ -36,6 +36,7 @@ interface Props {
   onAutoAssignCrews: (data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean }) => Promise<string[]>;
   onUnassignTrain: (trainId: string) => void;
   onCrewTrainHover?: (trainId: string | null) => void;
+  distanceUnit?: 'km' | 'mi';
 }
 
 export function Sidebar({
@@ -71,6 +72,7 @@ export function Sidebar({
   onAutoAssignCrews,
   onUnassignTrain,
   onCrewTrainHover,
+  distanceUnit,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [openSections, setOpenSections] = useLocalStorage('tg:openSections', { trains: true, stations: true, paths: false, crews: false });
@@ -680,6 +682,7 @@ export function Sidebar({
             stations={timetable.stations}
             open={openSections.stations}
             onToggle={() => toggleSection('stations')}
+            distanceUnit={distanceUnit}
             onAdd={onAddStation}
             onUpdate={onUpdateStation}
             onDelete={onDeleteStation}

@@ -169,6 +169,7 @@ export default function App() {
   // ── Sidebar + undo/redo ───────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage('tg:sidebarCollapsed', false);
   const [labelMode, setLabelMode] = useLocalStorage<'code' | 'name'>('tg:labelMode', 'code');
+  const [distanceUnit, setDistanceUnit] = useLocalStorage<'km' | 'mi'>('tg:distanceUnit', 'km');
   const [historyPast, setHistoryPast] = useState<Timetable[]>([]);
   const [historyFuture, setHistoryFuture] = useState<Timetable[]>([]);
   // Keep a ref so undo/redo callbacks can always see the latest timetable
@@ -342,6 +343,7 @@ export default function App() {
     shortCode: string;
     distance: number | null;
     graphPos: number;
+    branchName?: string | null;
   }) {
     if (!selectedId) return;
     const updated = await api.addStation(selectedId, data);
@@ -350,7 +352,7 @@ export default function App() {
 
   async function handleUpdateStation(
     stationId: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null }
   ) {
     if (!selectedId) return;
     const updated = await api.updateStation(selectedId, stationId, data);
@@ -680,6 +682,7 @@ export default function App() {
         onAutoAssignCrews={handleAutoAssignCrews}
         onUnassignTrain={handleUnassignTrain}
         onCrewTrainHover={setHoveredCrewTrainId}
+        distanceUnit={distanceUnit}
       />
 
       {/* ── MAIN GRAPH AREA ── */}
@@ -821,6 +824,8 @@ export default function App() {
                     <SettingsPanel
                       labelMode={labelMode}
                       onLabelModeChange={setLabelMode}
+                      distanceUnit={distanceUnit}
+                      onDistanceUnitChange={setDistanceUnit}
                       settings={timetable.settings}
                       onSettingsSave={handleSettingsSave}
                       clockStatus={clockStatus}
@@ -860,6 +865,7 @@ export default function App() {
               timetable={displayTimetable}
               onTrainClick={(train) => setModal({ type: 'editTrain', train })}
               labelMode={labelMode}
+              distanceUnit={distanceUnit}
               viewStart={viewStart}
               viewEnd={viewEnd}
               clockTime={clockTime}
@@ -886,6 +892,7 @@ export default function App() {
           paths={timetable.paths}
           crews={timetable.crews}
           existingColors={timetable.trains.map((t) => t.color)}
+          distanceUnit={distanceUnit}
           onDraftChange={setDraftTrain}
           onSave={handleSaveTrain}
           onDelete={modal.type === 'editTrain' ? () => handleDeleteTrain(modal.train.id) : undefined}

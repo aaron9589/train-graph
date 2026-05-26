@@ -5,10 +5,11 @@ interface Props {
   stations: Station[];
   open?: boolean;
   onToggle?: () => void;
-  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number }) => void;
+  distanceUnit?: 'km' | 'mi';
+  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName: string | null }) => void;
   onUpdate: (
     id: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName: string | null }
   ) => void;
   onDelete: (id: string) => void;
 }
@@ -18,11 +19,12 @@ interface StationFormData {
   shortCode: string;
   distance: string;   // optional km display label
   graphPos: string;   // required Y-axis position
+  branchName: string; // optional branch group name
 }
 
-const EMPTY: StationFormData = { name: '', shortCode: '', distance: '', graphPos: '' };
+const EMPTY: StationFormData = { name: '', shortCode: '', distance: '', graphPos: '', branchName: '' };
 
-export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDelete }: Props) {
+export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', onAdd, onUpdate, onDelete }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addForm, setAddForm] = useState<StationFormData | null>(null);
   const [editForm, setEditForm] = useState<StationFormData>(EMPTY);
@@ -44,6 +46,7 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
       shortCode: s.short_code,
       distance: s.distance != null ? String(s.distance) : '',
       graphPos: String(s.graph_pos ?? 0),
+      branchName: s.branch_name ?? '',
     });
     setAddForm(null);
     setError('');
@@ -71,6 +74,7 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
       shortCode: addForm.shortCode.trim(),
       distance: addForm.distance !== '' ? Number(addForm.distance) : null,
       graphPos: Number(addForm.graphPos),
+      branchName: addForm.branchName.trim() || null,
     });
     setAddForm(null);
     setError('');
@@ -85,6 +89,7 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
       distance: editForm.distance !== '' ? Number(editForm.distance) : null,
       graphPos: Number(editForm.graphPos),
       sortOrder: s.sort_order,
+      branchName: editForm.branchName.trim() || null,
     });
     setEditingId(null);
     setError('');
@@ -165,6 +170,13 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
                 title="Km label (display only, optional)"
                 className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
               />
+              <input
+                value={editForm.branchName}
+                onChange={(e) => setEditForm({ ...editForm, branchName: e.target.value })}
+                placeholder="Branch name (optional)"
+                title="Branch group — stations sharing this name are shown indented together on the graph"
+                className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+              />
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={cancelAll}
@@ -197,8 +209,7 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
                 <span className="text-sm text-slate-300 truncate block">{s.name}</span>
                 <span className="text-xs text-slate-600">
                   {s.short_code ? `${s.short_code} · ` : ''}pos {s.graph_pos ?? 0}
-                  {s.distance != null ? ` · ${s.distance} km` : ''}
-                </span>
+                  {s.distance != null ? ` · ${s.distance} ${distanceUnit ?? 'km'}` : ''}                  {s.branch_name ? ` · ${s.branch_name}` : ''}                </span>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); startEdit(s); }}
@@ -249,6 +260,13 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
               onChange={(e) => setAddForm({ ...addForm, distance: e.target.value })}
               placeholder="km label (optional)"
               title="Km label (display only, optional)"
+              className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+            />
+            <input
+              value={addForm.branchName}
+              onChange={(e) => setAddForm({ ...addForm, branchName: e.target.value })}
+              placeholder="Branch name (optional)"
+              title="Branch group — stations sharing this name are shown indented together on the graph"
               className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
             />
             <div className="flex gap-2 justify-end">

@@ -5,6 +5,8 @@ import type { ClockStatus } from '../hooks/useFastClock';
 interface Props {
   labelMode: 'code' | 'name';
   onLabelModeChange: (m: 'code' | 'name') => void;
+  distanceUnit: 'km' | 'mi';
+  onDistanceUnitChange: (u: 'km' | 'mi') => void;
   settings: TimetableSettings;
   onSettingsSave: (s: TimetableSettings) => Promise<void>;
   clockStatus: ClockStatus;
@@ -18,7 +20,8 @@ const APP_BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '');
 const API_BASE = APP_BASE + '/api';
 
 export function SettingsPanel({
-  labelMode, onLabelModeChange, settings, onSettingsSave, clockStatus, clockError, onClose,
+  labelMode, onLabelModeChange, distanceUnit, onDistanceUnitChange,
+  settings, onSettingsSave, clockStatus, clockError, onClose,
   timetableId, firstStationName,
 }: Props) {
   const [local, setLocal] = useState<TimetableSettings>(settings);
@@ -83,6 +86,21 @@ export function SettingsPanel({
               labelMode === 'name' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
             }`}
           >Name</button>
+        </div>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-3 mb-2">Distance unit</p>
+        <div className="flex rounded-lg overflow-hidden border border-slate-700">
+          <button
+            onClick={() => onDistanceUnitChange('km')}
+            className={`flex-1 py-1 text-xs font-mono transition-colors ${
+              distanceUnit === 'km' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >km</button>
+          <button
+            onClick={() => onDistanceUnitChange('mi')}
+            className={`flex-1 py-1 text-xs font-mono transition-colors ${
+              distanceUnit === 'mi' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >mi</button>
         </div>
       </div>
 
