@@ -75,6 +75,7 @@ export function Sidebar({
   distanceUnit,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [trainSearch, setTrainSearch] = useState('');
   const [openSections, setOpenSections] = useLocalStorage('tg:openSections', { trains: true, stations: true, paths: false, crews: false });
   const [editingCrew, setEditingCrew] = useState<{ id: string; name: string; color: string } | null>(null);
   const [newCrew, setNewCrew] = useState<{ name: string; color: string } | null>(null);
@@ -262,11 +263,24 @@ export function Sidebar({
             <p className="text-xs text-slate-600 mb-2">Add and manage trains on the graph. Dots indicate: <span className="text-blue-400">●</span> notes &nbsp;<span className="text-amber-400">●</span> special instructions &nbsp;<span className="text-green-400">●</span> crew assigned.</p>
             {openSections.trains && (
               <>
+                {timetable.trains.length > 0 && (
+                  <input
+                    type="text"
+                    value={trainSearch}
+                    onChange={(e) => setTrainSearch(e.target.value)}
+                    placeholder="Filter trains…"
+                    className="w-full mb-2 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-slate-500"
+                  />
+                )}
                 {timetable.trains.length === 0 && (
                   <p className="text-xs text-slate-600 py-1">No trains yet</p>
                 )}
                 <div className="space-y-1">
-                  {sortTrains(timetable.trains).map((train) => {
+                  {sortTrains(timetable.trains).filter((train) =>
+                    !trainSearch.trim() ||
+                    train.name.toLowerCase().includes(trainSearch.toLowerCase()) ||
+                    (train.train_id ?? '').toLowerCase().includes(trainSearch.toLowerCase())
+                  ).map((train) => {
                     const hidden = hiddenTrainIds.has(train.id);
                     const hasNotes = !!train.notes;
                     const hasSpecialInstructions = train.stops.some((s) => !!s.special_instructions);
