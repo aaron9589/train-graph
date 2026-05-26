@@ -369,7 +369,22 @@ app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
     if (st) {
       st.name = name.trim(); st.short_code = shortCode || '';
       st.distance = (distance !== '' && distance != null) ? Number(distance) : null;
-      if (graphPos != null && graphPos !== '') st.graph_pos = Number(graphPos);
+      if (graphPos != null && graphPos !== '') {
+        const newPos = Number(graphPos);
+        const others = tt.stations.filter((s) => s.id !== req.params.stationId);
+        const prevPos = others.reduce((m, s) => {
+          const p = s.graph_pos ?? 0;
+          return (p < newPos && p > m) ? p : m;
+        }, -Infinity);
+        const maxExisting = others.reduce((m, s) => Math.max(m, s.graph_pos ?? 0), -Infinity);
+        const effectivePos = (prevPos > -Infinity && newPos - prevPos < 1.0) ? prevPos + 1.0 : newPos;
+        if (others.length > 0 && effectivePos <= maxExisting) {
+          others.forEach((s) => {
+            if ((s.graph_pos ?? 0) >= effectivePos) s.graph_pos = (s.graph_pos ?? 0) + 1;
+          });
+        }
+        st.graph_pos = effectivePos;
+      }
       st.sort_order = sortOrder != null ? sortOrder : st.sort_order;
       st.branch_name = (branchName && String(branchName).trim()) ? String(branchName).trim() : null;
     }
@@ -546,6 +561,13 @@ function buildStops(trainId, stops) {
     }));
 }
 
+function normTime(t) {
+  if (!t || typeof t !== 'string') return t;
+  const parts = t.split(':');
+  if (parts.length < 2) return t;
+  return parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0');
+}
+
 function normalise(tt) {
   return {
     ...tt,
@@ -557,6 +579,14 @@ function normalise(tt) {
         (a.graph_pos ?? a.distance ?? 0) - (b.graph_pos ?? b.distance ?? 0) ||
         a.sort_order - b.sort_order
     ),
+    trains: (tt.trains ?? []).map((tr) => ({
+      ...tr,
+      stops: (tr.stops ?? []).map((s) => ({
+        ...s,
+        arrival: normTime(s.arrival),
+        departure: normTime(s.departure),
+      })),
+    })),
   };
 }
 

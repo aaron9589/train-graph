@@ -240,8 +240,9 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
     setError('');
 
     const timedStops = stops.filter((s) => s.arrival || s.departure);
-    const firstTimedId = timedStops[0]?.stationId;
-    const lastTimedId = timedStops[timedStops.length - 1]?.stationId;
+    const sortedByTime = [...timedStops].sort((a, b) => stopMinutes(a) - stopMinutes(b));
+    const firstTimedId = sortedByTime[0]?.stationId;
+    const lastTimedId = sortedByTime[sortedByTime.length - 1]?.stationId;
     const saveStops = timedStops.map((s) => ({
         stationId: s.stationId,
         // First timed stop departs only; last timed stop arrives only
@@ -254,14 +255,14 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
   }
 
   // Derived: which rows get the arrival-only / departure-only treatment.
-  // Applied only when there are at least 2 timed stops so a single-stop train
-  // isn't left with no editable time inputs.
-  const timedIndices = stops.reduce<number[]>((acc, s, i) => {
-    if (s.arrival || s.departure) acc.push(i);
-    return acc;
-  }, []);
-  const firstTimedIdx = timedIndices.length >= 2 ? timedIndices[0] : -1;
-  const lastTimedIdx  = timedIndices.length >= 2 ? timedIndices[timedIndices.length - 1] : -1;
+  // Use chronological time order (not graph_pos) so trains running in reverse
+  // direction (descending graph_pos) are handled correctly.
+  const timedStopsForOrder = stops.filter((s) => s.arrival || s.departure);
+  const [firstTimedId, lastTimedId] = (() => {
+    if (timedStopsForOrder.length < 2) return [null, null];
+    const sorted = [...timedStopsForOrder].sort((a, b) => stopMinutes(a) - stopMinutes(b));
+    return [sorted[0].stationId, sorted[sorted.length - 1].stationId];
+  })();
 
   return (
     <>
@@ -474,7 +475,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
 
                     {/* Arrival — hidden for first timed stop (departure only) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      {idx === firstTimedIdx ? (
+                      {stop.stationId === firstTimedId ? (
                         <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="First stop is departure only">—</span>
                       ) : (
                         <input
@@ -489,7 +490,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
 
                     {/* Departure — hidden for last timed stop (arrival only) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      {idx === lastTimedIdx ? (
+                      {stop.stationId === lastTimedId ? (
                         <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="Last stop is arrival only">—</span>
                       ) : (
                         <input
@@ -503,7 +504,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
 
                     {/* Dwell — hidden for last stop (no departure to compute against) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      {idx === lastTimedIdx ? (
+                      {stop.stationId === lastTimedId ? (
                         <span className="w-full" />
                       ) : (
                         <input
@@ -601,6 +602,13 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function stopMinutes(s: StopForm): number {
+  const t = s.departure || s.arrival;
+  if (!t) return Infinity;
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
 
 function buildStopForms(stations: Station[], existingStops?: TrainStop[]): StopForm[] {
   const stopMap = new Map(existingStops?.map((s) => [s.station_id, s]) ?? []);
