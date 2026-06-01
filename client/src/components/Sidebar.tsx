@@ -125,7 +125,7 @@ export function Sidebar({
             <ChevronLeftIcon />
           </button>
         </div>
-        <p className="text-xs text-slate-500 mb-3 pl-9">Operating Session Resource Planner</p>
+        <p className="text-xs text-slate-500 mb-3 pl-9">Operating Session Resource Planner <span className="text-slate-600">v{__APP_VERSION__}</span></p>
 
         {/* Timetable section */}
         <div className="flex items-center justify-between mb-2">
