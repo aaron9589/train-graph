@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
   clock_enabled: false,
   clock_broker_url: '',
   clock_topic: 'trains/jmri/memory/currentTime',
+  auto_assign_min_break: 0,
 };
 
 app.get('/api/timetables', (_req, res) => {
@@ -326,25 +327,14 @@ app.put('/api/timetables/:id/settings', (req, res) => {
 });
 
 app.post('/api/timetables/:id/stations', (req, res) => {
-  const { name, shortCode, distance, graphPos, branchName } = req.body;
+  const { name, shortCode, distance, graphPos, branchName, pushDown } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (graphPos == null || graphPos === '') return res.status(400).json({ error: 'graphPos is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
     const newPos = Number(graphPos);
-    const maxExisting = tt.stations.reduce((m, s) => Math.max(m, s.graph_pos ?? 0), -Infinity);
-    // Find the graph_pos of the station immediately below the insertion point
-    const prevPos = tt.stations.reduce((m, s) => {
-      const p = s.graph_pos ?? 0;
-      return (p < newPos && p > m) ? p : m;
-    }, -Infinity);
-    // Ensure at least 1.0-unit gap below the new station. If the user typed a
-    // position too close to the previous one, snap forward to prevPos + 1.0.
-    const effectivePos = (prevPos > -Infinity && newPos - prevPos < 1.0) ? prevPos + 1.0 : newPos;
-    // When inserting midway (not appending), shift everything at or beyond the
-    // effective position up by 1.0 to make room above.
-    if (tt.stations.length > 0 && effectivePos <= maxExisting) {
+    if (pushDown) {
       tt.stations.forEach((s) => {
-        if ((s.graph_pos ?? 0) >= effectivePos) s.graph_pos = (s.graph_pos ?? 0) + 1;
+        if ((s.graph_pos ?? 0) >= newPos) s.graph_pos = (s.graph_pos ?? 0) + 1;
       });
     }
     const maxOrder = tt.stations.reduce((m, s) => Math.max(m, s.sort_order || 0), -1);
@@ -352,7 +342,7 @@ app.post('/api/timetables/:id/stations', (req, res) => {
       id: uuidv4(), timetable_id: req.params.id, name: name.trim(),
       short_code: shortCode || '',
       distance: (distance !== '' && distance != null) ? Number(distance) : null,
-      graph_pos: effectivePos,
+      graph_pos: newPos,
       sort_order: maxOrder + 1,
       branch_name: (branchName && String(branchName).trim()) ? String(branchName).trim() : null,
     });
@@ -362,7 +352,7 @@ app.post('/api/timetables/:id/stations', (req, res) => {
 });
 
 app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
-  const { name, shortCode, distance, graphPos, sortOrder, branchName } = req.body;
+  const { name, shortCode, distance, graphPos, sortOrder, branchName, pushDown } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
     const st = tt.stations.find((s) => s.id === req.params.stationId);
@@ -371,19 +361,18 @@ app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
       st.distance = (distance !== '' && distance != null) ? Number(distance) : null;
       if (graphPos != null && graphPos !== '') {
         const newPos = Number(graphPos);
-        const others = tt.stations.filter((s) => s.id !== req.params.stationId);
-        const prevPos = others.reduce((m, s) => {
-          const p = s.graph_pos ?? 0;
-          return (p < newPos && p > m) ? p : m;
-        }, -Infinity);
-        const maxExisting = others.reduce((m, s) => Math.max(m, s.graph_pos ?? 0), -Infinity);
-        const effectivePos = (prevPos > -Infinity && newPos - prevPos < 1.0) ? prevPos + 1.0 : newPos;
-        if (others.length > 0 && effectivePos <= maxExisting) {
-          others.forEach((s) => {
-            if ((s.graph_pos ?? 0) >= effectivePos) s.graph_pos = (s.graph_pos ?? 0) + 1;
-          });
+        const oldPos = st.graph_pos ?? 0;
+        if (pushDown) {
+          const delta = newPos - oldPos;
+          if (delta !== 0) {
+            tt.stations.forEach((s) => {
+              if (s.id !== req.params.stationId && (s.graph_pos ?? 0) > oldPos) {
+                s.graph_pos = (s.graph_pos ?? 0) + delta;
+              }
+            });
+          }
         }
-        st.graph_pos = effectivePos;
+        st.graph_pos = newPos;
       }
       st.sort_order = sortOrder != null ? sortOrder : st.sort_order;
       st.branch_name = (branchName && String(branchName).trim()) ? String(branchName).trim() : null;
@@ -593,10 +582,11 @@ function normalise(tt) {
 // ── Auto-assign trains to crews ───────────────────────────────
 
 app.post('/api/timetables/:id/trains/auto-assign', (req, res) => {
-  const { crewIds, trainIds, onlyUnassigned } = req.body;
+  const { crewIds, trainIds, onlyUnassigned, minBreakMins } = req.body;
   if (!Array.isArray(crewIds) || crewIds.length === 0) {
     return res.status(400).json({ error: 'crewIds must be a non-empty array' });
   }
+  const breakMins = Math.max(0, Number(minBreakMins) || 0);
 
   function trainMinutes(tr) {
     let start = Infinity, end = -Infinity;
@@ -623,40 +613,62 @@ app.post('/api/timetables/:id/trains/auto-assign', (req, res) => {
       return true;
     });
 
-    // Sort by start time
-    const sorted = [...candidates].sort((a, b) => trainMinutes(a).start - trainMinutes(b).start);
-
-    // Track the latest end minute and job count per crew.
+    // Track all occupied intervals and job count per crew.
     // Pre-seed with any jobs those crews already hold (so existing assignments
     // act as hard constraints and aren't overlapped).
-    const crewEnds = {};
+    // Using intervals (not just max-end) means gaps between existing jobs are
+    // visible and new trains can fill them.
+    const crewIntervals = {};
     const crewCounts = {};
+    const crewLastEnd = {};
     const crewIdSet = new Set(crewIds);
-    crewIds.forEach((id) => { crewEnds[id] = -1; crewCounts[id] = 0; });
+    crewIds.forEach((id) => { crewIntervals[id] = []; crewCounts[id] = 0; crewLastEnd[id] = -1; });
     for (const tr of tt.trains) {
       if (!tr.crew_id || !crewIdSet.has(tr.crew_id)) continue;
-      const { end } = trainMinutes(tr);
-      if (end > crewEnds[tr.crew_id]) crewEnds[tr.crew_id] = end;
+      const { start, end } = trainMinutes(tr);
+      crewIntervals[tr.crew_id].push({ start, end });
+      if (end > crewLastEnd[tr.crew_id]) crewLastEnd[tr.crew_id] = end;
       crewCounts[tr.crew_id]++;
     }
 
+    // Returns true if [start, end] doesn't overlap any interval in the list,
+    // respecting the mandatory break gap between jobs.
+    function isFree(intervals, start, end) {
+      return intervals.every(({ start: s, end: e }) => end + breakMins <= s || start >= e + breakMins);
+    }
+
+    // Sort using MRV (minimum remaining values): process the most constrained
+    // trains first — those with the fewest crews available given pre-existing
+    // schedules. This prevents a train with many choices from accidentally
+    // consuming the only crew that a more constrained train could have used.
+    // Break ties by start time so the overall schedule stays chronological.
+    const sorted = [...candidates].sort((a, b) => {
+      const { start: sa, end: ea } = trainMinutes(a);
+      const { start: sb, end: eb } = trainMinutes(b);
+      const availA = crewIds.filter((id) => isFree(crewIntervals[id], sa, ea)).length;
+      const availB = crewIds.filter((id) => isFree(crewIntervals[id], sb, eb)).length;
+      if (availA !== availB) return availA - availB;
+      return sa - sb;
+    });
+
     for (const train of sorted) {
       const { start, end } = trainMinutes(train);
-      // Collect all crews who are free (no overlap with this train's start)
-      const available = crewIds.filter((id) => crewEnds[id] < start);
+      // Collect all crews who have no overlapping job
+      const available = crewIds.filter((id) => isFree(crewIntervals[id], start, end));
       if (!available.length) {
         unassignedNames.push(train.name);
         continue;
       }
-      // Pick the crew with the fewest jobs; break ties by who finished earliest
+      // Pick the crew with the fewest jobs; break ties by who finished most recently
       available.sort((a, b) =>
         crewCounts[a] !== crewCounts[b]
           ? crewCounts[a] - crewCounts[b]
-          : crewEnds[a] - crewEnds[b]
+          : crewLastEnd[a] - crewLastEnd[b]
       );
       const chosen = available[0];
       train.crew_id = chosen;
-      crewEnds[chosen] = end;
+      crewIntervals[chosen].push({ start, end });
+      if (end > crewLastEnd[chosen]) crewLastEnd[chosen] = end;
       crewCounts[chosen]++;
     }
   });

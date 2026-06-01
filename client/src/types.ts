@@ -59,6 +59,7 @@ export interface TimetableSettings {
   clock_enabled: boolean;
   clock_broker_url: string;
   clock_topic: string;
+  auto_assign_min_break: number;
 }
 
 export interface Timetable extends TimetableSummary {
