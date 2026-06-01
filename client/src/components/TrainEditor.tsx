@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type InputHTMLAttributes } from 'react';
 import type { Station, Train, TrainStop, TrainRequest, Path, PathStop, Crew } from '../types';
 
 interface StopForm {
@@ -478,10 +478,9 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
                       {stop.stationId === firstTimedId ? (
                         <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="First stop is departure only">—</span>
                       ) : (
-                        <input
-                          type="time"
+                        <TimeInput
                           value={stop.arrival}
-                          onChange={(e) => updateStop(idx, 'arrival', e.target.value)}
+                          onChange={(v) => updateStop(idx, 'arrival', v)}
                           onBlur={() => inferDeparture(idx)}
                           className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
                         />
@@ -493,10 +492,9 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
                       {stop.stationId === lastTimedId ? (
                         <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="Last stop is arrival only">—</span>
                       ) : (
-                        <input
-                          type="time"
+                        <TimeInput
                           value={stop.departure}
-                          onChange={(e) => updateStop(idx, 'departure', e.target.value)}
+                          onChange={(v) => updateStop(idx, 'departure', v)}
                           className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
                         />
                       )}
@@ -695,6 +693,31 @@ function detectDirection(stops: StopForm[]): 'down' | 'up' {
     .filter((s) => s.min >= 0);
   if (timed.length < 2) return 'down';
   return timed[0].min <= timed[timed.length - 1].min ? 'down' : 'up';
+}
+
+// Safari renders a default time (e.g. 12:30 PM) for <input type="time" value="">
+// instead of the blank --:-- -- placeholder that other browsers show.
+// Fix: render as type="text" when empty and not focused; switch to type="time" on focus.
+function TimeInput({ value, onChange, onBlur, className, ...rest }: {
+  value: string;
+  onChange: (v: string) => void;
+  onBlur?: () => void;
+  className?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur' | 'type'>) {
+  const [focused, setFocused] = useState(false);
+  const asTime = value !== '' || focused;
+  return (
+    <input
+      {...rest}
+      type={asTime ? 'time' : 'text'}
+      value={value}
+      placeholder={asTime ? undefined : '--:-- --'}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => { setFocused(false); onBlur?.(); }}
+      className={className}
+    />
+  );
 }
 
 function diffMinutes(from: string, to: string): number {

@@ -9,6 +9,7 @@ const MAJOR_TICK = 60; // minutes
 // Minimum pixels between adjacent station lines. The graph only grows taller
 // than the container (and scrolls) when the tightest gap would otherwise render
 // below this threshold — so simple/sparse timetables always fill the viewport.
+// Labels are always shown regardless of proximity (server ensures ≥1.0 unit gaps).
 const MIN_STATION_GAP_PX = 18;
 
 // Colour palette for branch groups (cycles if more than 8 branches)
@@ -437,11 +438,9 @@ export function TrainGraph({
                 <text x={x} y={PAD.top - 6} textAnchor="middle" fill="#64748b" fontSize="11" fontFamily="monospace">
                   {minutesToTime(min)}
                 </text>
-                {needsVScroll && (
-                  <text x={x} y={PAD.top + gh + 18} textAnchor="middle" fill="#64748b" fontSize="11" fontFamily="monospace">
-                    {minutesToTime(min)}
-                  </text>
-                )}
+                <text x={x} y={PAD.top + gh + 18} textAnchor="middle" fill="#64748b" fontSize="11" fontFamily="monospace">
+                  {minutesToTime(min)}
+                </text>
               </g>
             );
           })}
@@ -474,13 +473,16 @@ export function TrainGraph({
               const branchName = station.branch_name ?? null;
               const branchColor = branchName ? (branchColorMap.get(branchName) ?? '#64748b') : null;
 
-              // Always show label for first station in a branch regardless of proximity
               const isFirstBranchStation = branchName !== null && !firstBranchStationShown.has(branchName);
               if (isFirstBranchStation) firstBranchStationShown.add(branchName);
 
               const kmLabel = station.distance != null ? `${station.distance}${distanceUnit}` : null;
               const rowH = kmLabel ? 20 : 16;
-              const showLabel = isFirstBranchStation || (y - lastLabelY >= 14);
+              // Show label only when it physically fits — suppress only when the previous
+              // label's bottom would overlap this station line (threshold = 0, not +14).
+              // This fixes the original KJN bug (old threshold was rowH+14 = 30px, too tight)
+              // while still preventing genuine overlap on dense timetables like LIRR.
+              const showLabel = isFirstBranchStation || (y - lastLabelY >= 0);
               if (showLabel) lastLabelY = y + rowH;
 
               elements.push(
@@ -587,9 +589,9 @@ export function TrainGraph({
             className="flex-1 mr-6 h-full relative cursor-pointer py-1"
             onClick={handleScrollbarTrackClick}
           >
-            <div className="absolute inset-y-[7px] inset-x-0 bg-slate-800 rounded-full" />
+            <div className="absolute inset-y-[8px] inset-x-0 bg-slate-800 rounded-full" />
             <div
-              className="absolute inset-y-[3px] rounded-full bg-slate-500 hover:bg-slate-400 transition-colors cursor-grab active:cursor-grabbing"
+              className="absolute inset-y-[7px] rounded-full bg-slate-500 hover:bg-slate-400 transition-colors cursor-grab active:cursor-grabbing"
               style={{ left: `${thumbOffset * 100}%`, width: `${thumbFrac * 100}%` }}
               onMouseDown={handleScrollbarMouseDown}
               onClick={(e) => e.stopPropagation()}

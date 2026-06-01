@@ -6,10 +6,10 @@ interface Props {
   open?: boolean;
   onToggle?: () => void;
   distanceUnit?: 'km' | 'mi';
-  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName: string | null }) => void;
+  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName: string | null; pushDown: boolean }) => void;
   onUpdate: (
     id: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName: string | null }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName: string | null; pushDown: boolean }
   ) => void;
   onDelete: (id: string) => void;
 }
@@ -28,6 +28,7 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addForm, setAddForm] = useState<StationFormData | null>(null);
   const [editForm, setEditForm] = useState<StationFormData>(EMPTY);
+  const [pushDown, setPushDown] = useState(false);
   const [error, setError] = useState('');
 
   const sorted = [...stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
@@ -75,6 +76,7 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
       distance: addForm.distance !== '' ? Number(addForm.distance) : null,
       graphPos: Number(addForm.graphPos),
       branchName: addForm.branchName.trim() || null,
+      pushDown,
     });
     setAddForm(null);
     setError('');
@@ -90,6 +92,7 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
       graphPos: Number(editForm.graphPos),
       sortOrder: s.sort_order,
       branchName: editForm.branchName.trim() || null,
+      pushDown,
     });
     setEditingId(null);
     setError('');
@@ -177,6 +180,15 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
                 title="Branch group — stations sharing this name are shown indented together on the graph"
                 className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
               />
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={pushDown}
+                  onChange={(e) => setPushDown(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                Shift stations below by position delta
+              </label>
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={cancelAll}
@@ -269,6 +281,15 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
               title="Branch group — stations sharing this name are shown indented together on the graph"
               className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
             />
+            <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={pushDown}
+                onChange={(e) => setPushDown(e.target.checked)}
+                className="accent-blue-500"
+              />
+              Shift stations below by position delta
+            </label>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={cancelAll}
