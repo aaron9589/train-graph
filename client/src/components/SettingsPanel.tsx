@@ -10,12 +10,16 @@ interface Props {
   clockStatus: ClockStatus;
   clockError: string | null;
   onClose: () => void;
+  timetableId?: string;
+  firstStationName?: string;
 }
 
-const API_BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '') + '/api';
+const APP_BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '');
+const API_BASE = APP_BASE + '/api';
 
 export function SettingsPanel({
   labelMode, onLabelModeChange, settings, onSettingsSave, clockStatus, clockError, onClose,
+  timetableId, firstStationName,
 }: Props) {
   const [local, setLocal] = useState<TimetableSettings>(settings);
   const [saving, setSaving] = useState(false);
@@ -32,6 +36,13 @@ export function SettingsPanel({
   }, [onClose]);
 
   const dirty = JSON.stringify(local) !== JSON.stringify(settings);
+
+  const inspectorUrl = (() => {
+    const url = new URL(`${APP_BASE}/ws-inspector.html`, window.location.href);
+    if (timetableId) url.searchParams.set('id', timetableId);
+    if (firstStationName) url.searchParams.set('station', firstStationName);
+    return url.toString();
+  })();
 
   async function handleSave() {
     setSaving(true);
@@ -163,6 +174,35 @@ export function SettingsPanel({
         >
           {saving ? 'Saving...' : dirty ? 'Save changes' : 'Saved'}
         </button>
+      </div>
+
+      {/* Developer tools */}
+      <div className="px-4 py-3 border-t border-slate-800">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Developer tools</p>
+        <div className="flex flex-col gap-1.5">
+          <a
+            href={inspectorUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-400 transition-colors"
+          >
+            <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            WS Inspector
+          </a>
+          <a
+            href={`${API_BASE}/docs`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-400 transition-colors"
+          >
+            <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            API Schema
+          </a>
+        </div>
       </div>
     </div>
   );

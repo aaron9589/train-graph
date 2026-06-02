@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LiveRun WebSocket Inspector</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+      :root {
+        --bg: #0f172a;
+        --surface: #1e293b;
+        --surface-2: #0f172a;
+        --border: #334155;
+        --text: #f1f5f9;
+        --muted: #94a3b8;
+        --accent: #6366f1;
+        --danger: #ef4444;
+        --ok: #22c55e;
+        --warning: #f59e0b;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+        color: var(--text);
+        background: var(--bg);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: #1e293b; }
+      ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+      .shell {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 16px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+      }
+
+      .controls { padding: 16px; }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 1.05rem;
+        font-weight: 600;
+      }
+
+      .hint {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.45;
+      }
+
+      .section-label {
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+
+      hr.divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 14px 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .full { grid-column: 1 / -1; }
+
+      label {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 0.72rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+      }
+
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font: inherit;
+        font-size: 0.85rem;
+        color: var(--text);
+        transition: border-color 0.15s;
+        appearance: auto;
+        color-scheme: dark;
+      }
+
+      input:focus, select:focus, textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+      }
+
+      textarea {
+        min-height: 96px;
+        font-family: ui-monospace, 'Cascadia Mono', Menlo, Monaco, monospace;
+        font-size: 0.78rem;
+        resize: vertical;
+      }
+
+      .buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      button {
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        width: 100%;
+        transition: opacity 0.15s, filter 0.15s;
+      }
+
+      button:hover:not(:disabled) { filter: brightness(1.12); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      .btn-connect { background: #166534; border-color: #15803d; color: #bbf7d0; }
+      .btn-disconnect { background: #7f1d1d; border-color: #991b1b; color: #fecaca; }
+      .btn-action { background: #1e1b4b; border-color: #4338ca; color: #a5b4fc; }
+
+      .status {
+        margin-top: 12px;
+        padding: 9px 12px;
+        border-radius: 8px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        font-size: 0.82rem;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+
+      .status strong { color: var(--warning); }
+
+      .viewer {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-height: 70vh;
+      }
+
+      .viewer-header {
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 0.88rem;
+      }
+
+      .viewer-body {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        min-height: 0;
+      }
+
+      .pane { min-height: 0; }
+
+      .pane + .pane { border-left: 1px solid var(--border); }
+
+      .pane h2 {
+        margin: 0;
+        font-size: 0.68rem;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        font-weight: 600;
+        color: var(--muted);
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface-2);
+      }
+
+      pre {
+        margin: 0;
+        padding: 12px;
+        height: calc(70vh - 88px);
+        overflow: auto;
+        font-size: 0.78rem;
+        line-height: 1.55;
+        font-family: ui-monospace, 'Cascadia Mono', Menlo, Monaco, monospace;
+        color: var(--muted);
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #475569;
+        flex-shrink: 0;
+      }
+
+      .dot.connected  { background: var(--ok);      box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+      .dot.connecting { background: var(--warning); animation: blink 1s ease-in-out infinite; }
+      .dot.closed     { background: #475569; }
+      .dot.error      { background: var(--danger); }
+
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.35; }
+      }
+
+      @media (max-width: 980px) {
+        .shell { grid-template-columns: 1fr; }
+        .viewer-body { grid-template-columns: 1fr; }
+        .pane + .pane { border-left: 0; border-top: 1px solid var(--border); }
+        pre { height: 40vh; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="card controls">
+        <h1>WebSocket Inspector</h1>
+        <p class="hint">Connect to the station feed and inspect MQTT-driven updates as the timetable fast clock changes.</p>
+
+        <div class="grid">
+          <div class="full">
+            <label for="wsUrl">WebSocket base URL</label>
+            <input id="wsUrl" type="text" />
+          </div>
+
+          <div>
+            <label for="timetableId">Timetable ID</label>
+            <input id="timetableId" type="text" placeholder="UUID" />
+          </div>
+
+          <div>
+            <label for="station">Station</label>
+            <input id="station" type="text" placeholder="Kiama" />
+          </div>
+
+          <div>
+            <label for="direction">Direction</label>
+            <select id="direction">
+              <option value="">All</option>
+              <option value="up">Up</option>
+              <option value="down">Down</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="trainIdFilter">TrainID filter (%/_)</label>
+            <input id="trainIdFilter" type="text" placeholder="%cityrail%" />
+          </div>
+
+          <div>
+            <label for="trainTypeFilter">Train type filter (%/_)</label>
+            <input id="trainTypeFilter" type="text" placeholder="%express%" />
+          </div>
+
+          <div>
+            <label for="futureCount">Future services count</label>
+            <input id="futureCount" type="number" min="1" max="100" value="10" />
+          </div>
+
+          <div class="full buttons">
+            <button id="connectBtn" class="btn-connect" type="button">Connect</button>
+            <button id="disconnectBtn" class="btn-disconnect" type="button">Disconnect</button>
+          </div>
+
+        </div>
+
+        <div class="status" id="statusBox">
+          <strong>Status:</strong> idle
+        </div>
+      </section>
+
+      <section class="card viewer">
+        <header class="viewer-header">
+          <strong>Live Feed</strong>
+          <span class="chip"><span id="stateDot" class="dot closed"></span><span id="stateText">closed</span></span>
+        </header>
+
+        <div class="viewer-body">
+          <article class="pane">
+            <h2>Latest Message</h2>
+            <pre id="latest">No message yet.</pre>
+          </article>
+
+          <article class="pane">
+            <h2>Event Log</h2>
+            <pre id="log"></pre>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const wsUrlInput = document.getElementById('wsUrl');
+      const timetableIdInput = document.getElementById('timetableId');
+      const stationInput = document.getElementById('station');
+      const directionInput = document.getElementById('direction');
+      const trainIdFilterInput = document.getElementById('trainIdFilter');
+      const trainTypeFilterInput = document.getElementById('trainTypeFilter');
+      const futureCountInput = document.getElementById('futureCount');
+      const connectBtn = document.getElementById('connectBtn');
+      const disconnectBtn = document.getElementById('disconnectBtn');
+      const statusBox = document.getElementById('statusBox');
+      const latest = document.getElementById('latest');
+      const log = document.getElementById('log');
+      const stateDot = document.getElementById('stateDot');
+      const stateText = document.getElementById('stateText');
+
+      let ws = null;
+
+      function defaultWsBase() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return proto + '//' + location.host + '/api/live/station-feed';
+      }
+
+      function applyQueryPrefill() {
+        const p = new URLSearchParams(location.search);
+        const id = p.get('id');
+        const station = p.get('station');
+        const direction = p.get('direction');
+        const trainId = p.get('trainId');
+        const trainType = p.get('trainType');
+        const futureCount = p.get('futureCount');
+        if (id) timetableIdInput.value = id;
+        if (station) stationInput.value = station;
+        if (direction === 'up' || direction === 'down') directionInput.value = direction;
+        if (trainId) trainIdFilterInput.value = trainId;
+        if (trainType) trainTypeFilterInput.value = trainType;
+        if (futureCount) futureCountInput.value = futureCount;
+      }
+
+      function setStatus(msg) {
+        statusBox.innerHTML = '<strong>Status:</strong> ' + msg;
+      }
+
+      function setState(state) {
+        stateDot.className = 'dot ' + state;
+        stateText.textContent = state;
+      }
+
+      function appendLog(type, payload) {
+        const stamp = new Date().toISOString();
+        const line = '[' + stamp + '] ' + type + ': ' + payload;
+        log.textContent = (line + '\n' + log.textContent).slice(0, 20000);
+      }
+
+      function buildUrl() {
+        const base = wsUrlInput.value.trim() || defaultWsBase();
+        const url = new URL(base);
+        const id = timetableIdInput.value.trim();
+        const station = stationInput.value.trim();
+        const direction = directionInput.value;
+        const trainId = trainIdFilterInput.value.trim();
+        const trainType = trainTypeFilterInput.value.trim();
+        const futureCount = futureCountInput.value.trim();
+
+        if (!id) throw new Error('Timetable ID is required');
+        if (!station) throw new Error('Station is required');
+
+        url.searchParams.set('id', id);
+        url.searchParams.set('station', station);
+        if (direction) url.searchParams.set('direction', direction);
+        if (trainId) url.searchParams.set('trainId', trainId);
+        if (trainType) url.searchParams.set('trainType', trainType);
+        if (futureCount) url.searchParams.set('futureCount', futureCount);
+
+        return url.toString();
+      }
+
+      function disconnect() {
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+      }
+
+      function sendJson(obj) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error('Socket is not connected');
+        }
+        ws.send(JSON.stringify(obj));
+        appendLog('sent', JSON.stringify(obj));
+      }
+
+      connectBtn.addEventListener('click', () => {
+        disconnect();
+
+        let target;
+        try {
+          target = buildUrl();
+        } catch (err) {
+          setStatus(err.message);
+          appendLog('error', err.message);
+          return;
+        }
+
+        setState('connecting');
+        setStatus('connecting to ' + target);
+        appendLog('connect', target);
+
+        ws = new WebSocket(target);
+
+        ws.addEventListener('open', () => {
+          setState('connected');
+          setStatus('connected');
+          appendLog('open', target);
+        });
+
+        ws.addEventListener('message', (event) => {
+          let text = String(event.data);
+          appendLog('recv', text);
+
+          try {
+            const parsed = JSON.parse(text);
+            latest.textContent = JSON.stringify(parsed, null, 2);
+          } catch {
+            latest.textContent = text;
+          }
+        });
+
+        ws.addEventListener('error', () => {
+          setState('error');
+          setStatus('socket error');
+          appendLog('error', 'socket error');
+        });
+
+        ws.addEventListener('close', (ev) => {
+          setState('closed');
+          setStatus('closed (code ' + ev.code + ')');
+          appendLog('close', 'code=' + ev.code + ' reason=' + (ev.reason || '(none)'));
+        });
+      });
+
+      disconnectBtn.addEventListener('click', () => {
+        disconnect();
+        setState('closed');
+        setStatus('disconnected');
+        appendLog('manual', 'disconnect');
+      });
+
+      wsUrlInput.value = defaultWsBase();
+      stationInput.value = 'Kiama';
+      applyQueryPrefill();
+      setStatus('ready');
+      setState('closed');
+    </script>
+  </body>
+</html>

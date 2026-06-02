@@ -220,6 +220,65 @@ Even in the unlikely event that someone on the LAN makes an unwanted change, the
 
 A read-only REST API for connecting guard panels, JMRI displays, and operator apps to the active session. Full endpoint reference is available at **`/api/docs`** when the app is running.
 
+### Quick endpoint guide
+
+- `GET /api/active-timetable`
+  Returns `{ id }` for the timetable currently marked active.
+
+- `GET /api/timetables/{id}/live/trains`
+  Returns all services sorted by start time.
+
+- `GET /api/timetables/{id}/live/trains/{trainName}`
+  Returns the full timetable and stopping list for one service.
+
+- `GET /api/timetables/{id}/live/stations/{stationName}`
+  Returns all services calling at a station, including each service's onward stopping pattern from that station.
+
+- `GET /api/timetables/{id}/live/stations/{stationName}?direction=up`
+  Same as above, filtered to Up services only. Use `direction=down` for Down services.
+  Up/Down is determined by station order: moving toward higher station order is `down`, lower station order is `up`.
+
+- `GET /api/timetables/{id}/live/stations/{stationName}?trainId=%cityrail%`
+  Optional TrainID wildcard filter (case-insensitive).
+  `%` matches any sequence and `_` matches a single character.
+
+### Example station display flow
+
+1. Call `/api/active-timetable` and read the returned `id`.
+2. Call `/api/timetables/{id}/live/stations/Kiama` for a full board (both directions).
+3. Call `/api/timetables/{id}/live/stations/Kiama?direction=down` for a direction-specific board.
+
+### WebSocket station feed
+
+For a live station board that updates as time advances, connect to:
+
+- `ws://localhost:3001/api/live/station-feed?id={timetableId}&station={stationName}&direction=up`
+- `direction` is optional (`up` or `down`). Omit it for both directions.
+- `trainId` is optional and supports case-insensitive wildcards, e.g. `trainId=%cityrail%`.
+- Optional tuning:
+  - `futureCount` (default `10`) limits results to the next N future services.
+
+The WebSocket feed is driven by the timetable fast clock MQTT settings (`clock_enabled`, `clock_broker_url`, `clock_topic`).
+On connect, LiveRun subscribes to that topic and pushes a new station feed snapshot whenever the clock value changes.
+
+On connect, the server sends:
+
+- `type: "hello"` once
+- `type: "stationFeed"` repeatedly with:
+  - `clockTime`
+  - `services[]`
+  - `minutesUntil` per service
+
+### Browser inspector page
+
+LiveRun includes a built-in WebSocket inspector page for testing this feed in your browser:
+
+- `http://localhost:3001/ws-inspector.html` (Docker / production server)
+- `http://localhost:5173/ws-inspector.html` (Vite dev server)
+
+Enter your timetable ID and station, click **Connect**, and watch incoming messages in real time.
+You can also launch it directly from the app header via **WS Inspector**.
+
 ---
 
 ## Project Structure
