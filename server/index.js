@@ -1,13 +1,17 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { WebSocketServer } = require('ws');
+const mqtt = require('mqtt');
 const path = require('path');
 const { readDB, writeDB, getTimetable, mutateTimetable, uuidv4 } = require('./db');
 const openApiSpec = require('./openapi');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
+const WS_STATION_FEED_PATH = '/api/live/station-feed';
 // Optional sub-path prefix, e.g. BASE_PATH=/traingraph
 // Strips the prefix from incoming URLs before any routing so the same
 // image works whether the reverse proxy rewrites the path or not.
@@ -634,6 +638,166 @@ function computeNextCrewService(tt, train) {
   return sorted[idx + 1].name;
 }
 
+function minuteFromTime(t) {
+  if (!t) return null;
+  const [h, m] = String(t).split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function parseClockMinuteFromPayload(raw) {
+  let s = String(raw || '').trim();
+  try {
+    const obj = JSON.parse(s);
+    s = String(obj.value ?? obj.time ?? obj.Value ?? s).trim();
+  } catch {
+    // Not JSON payload, continue with plain text matching.
+  }
+  const m = s.match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function minuteForStop(stop) {
+  return minuteFromTime(stop.arrival || stop.departure);
+}
+
+function formatClockMinute(minute) {
+  const normalized = ((minute % 1440) + 1440) % 1440;
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${h}:${String(m).padStart(2, '0')}`;
+}
+
+function parseDirection(value) {
+  const direction = String(value || '').trim().toLowerCase();
+  if (!direction) return '';
+  if (direction === 'up' || direction === 'down') return direction;
+  return null;
+}
+
+function parseTrainIdFilter(value) {
+  const raw = String(value || '').trim();
+  return raw;
+}
+
+function makeLikeMatcher(pattern) {
+  if (!pattern) return null;
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regexBody = escaped.replace(/%/g, '.*').replace(/_/g, '.');
+  return new RegExp(`^${regexBody}$`, 'i');
+}
+
+function sortStationsForDirection(stations) {
+  return [...(stations || [])].sort(
+    (a, b) =>
+      (a.graph_pos ?? a.distance ?? 0) - (b.graph_pos ?? b.distance ?? 0) ||
+      (a.sort_order ?? 0) - (b.sort_order ?? 0)
+  );
+}
+
+function getSequencedTimedStops(train, stationOrderById) {
+  const timedStops = (train.stops || [])
+    .filter((s) => (s.arrival || s.departure) && stationOrderById.has(s.station_id));
+
+  return [...timedStops].sort((a, b) => {
+    const am = minuteForStop(a);
+    const bm = minuteForStop(b);
+    if (am == null && bm == null) return 0;
+    if (am == null) return 1;
+    if (bm == null) return -1;
+    return am - bm;
+  });
+}
+
+function deriveDirectionAtStation(train, stationId, stationOrderById) {
+  const sequencedStops = getSequencedTimedStops(train, stationOrderById);
+  if (sequencedStops.length < 2) return '';
+
+  const idx = sequencedStops.findIndex((s) => s.station_id === stationId);
+  if (idx === -1) return '';
+  const here = stationOrderById.get(stationId);
+  if (here == null) return '';
+
+  let delta = 0;
+  if (idx + 1 < sequencedStops.length) {
+    const next = stationOrderById.get(sequencedStops[idx + 1].station_id);
+    if (next != null) delta = next - here;
+  }
+  if (delta === 0 && idx > 0) {
+    const prev = stationOrderById.get(sequencedStops[idx - 1].station_id);
+    if (prev != null) delta = here - prev;
+  }
+
+  // By station order convention: increasing order = down, decreasing order = up.
+  if (delta > 0) return 'down';
+  if (delta < 0) return 'up';
+  return '';
+}
+
+function buildStationBoard(tt, stationNameParam, directionQuery, trainIdFilter, trainTypeFilter) {
+  const sortedStations = sortStationsForDirection(tt.stations || []);
+  const stationOrderById = new Map(sortedStations.map((s, idx) => [s.id, idx]));
+  const trainIdMatcher = makeLikeMatcher(trainIdFilter);
+  const trainTypeMatcher = makeLikeMatcher(trainTypeFilter);
+  const stationNameQuery = String(stationNameParam || '').trim().toLowerCase();
+  const station = (sortedStations || []).find((s) => String(s.name || '').trim().toLowerCase() === stationNameQuery);
+  if (!station) {
+    return { status: 404, error: 'Station not found' };
+  }
+
+  const stationMap = new Map((sortedStations || []).map((s) => [s.id, s]));
+  const services = (tt.trains || [])
+    .map((tr) => {
+      const sequencedStops = getSequencedTimedStops(tr, stationOrderById);
+      const stationStopIndex = sequencedStops.findIndex((stop) => stop.station_id === station.id);
+      if (stationStopIndex === -1) return null;
+      const stationStop = sequencedStops[stationStopIndex];
+      const derivedDirection = deriveDirectionAtStation(tr, station.id, stationOrderById);
+      if (directionQuery && derivedDirection !== directionQuery) return null;
+      if (trainIdMatcher && !trainIdMatcher.test(String(tr.train_id || ''))) return null;
+      if (trainTypeMatcher && !trainTypeMatcher.test(String(tr.train_type || ''))) return null;
+      const stoppingPattern = sequencedStops.slice(stationStopIndex).map((stop) => {
+        const stopStation = stationMap.get(stop.station_id);
+        return {
+          stopName: stopStation ? stopStation.name : stop.station_id,
+          arrival: stop.arrival || null,
+          departure: stop.departure || null,
+          specialInstructions: stop.special_instructions || null,
+        };
+      });
+      const eventTime = stationStop.arrival || stationStop.departure || null;
+      return {
+        name: tr.name,
+        trainType: tr.train_type || '',
+        trainId: tr.train_id || '',
+        direction: derivedDirection || tr.direction || '',
+        notes: tr.notes || '',
+        nextCrewService: computeNextCrewService(tt, tr),
+        arrival: stationStop.arrival || null,
+        departure: stationStop.departure || null,
+        eventTime,
+        stoppingPattern,
+        _sortMinute: minuteForStop(stationStop),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const am = a._sortMinute == null ? Number.POSITIVE_INFINITY : a._sortMinute;
+      const bm = b._sortMinute == null ? Number.POSITIVE_INFINITY : b._sortMinute;
+      return am - bm || a.name.localeCompare(b.name);
+    })
+    .map(({ _sortMinute, ...service }) => service);
+
+  return {
+    stationName: station.name,
+    direction: directionQuery || 'all',
+    trainIdFilter: trainIdFilter || null,
+    trainTypeFilter: trainTypeFilter || null,
+    services,
+  };
+}
+
 app.get('/api/timetables/:id/live/trains', (req, res) => {
   const tt = getTimetable(req.params.id);
   if (!tt) return res.status(404).json({ error: 'Not found' });
@@ -687,6 +851,64 @@ app.get('/api/timetables/:id/live/trains/:trainName', (req, res) => {
     stops,
   });
 });
+
+app.get('/api/timetables/:id/live/stations/:stationName', (req, res) => {
+  const tt = getTimetable(req.params.id);
+  if (!tt) return res.status(404).json({ error: 'Not found' });
+
+  const directionQuery = parseDirection(req.query.direction);
+  const trainIdFilter = parseTrainIdFilter(req.query.trainId);
+  const trainTypeFilter = parseTrainIdFilter(req.query.trainType);
+  if (directionQuery === null) {
+    return res.status(400).json({ error: 'direction must be "up" or "down"' });
+  }
+
+  const board = buildStationBoard(tt, req.params.stationName, directionQuery, trainIdFilter, trainTypeFilter);
+  if (board.error) return res.status(board.status || 500).json({ error: board.error });
+  res.json(board);
+});
+
+function sendWsJson(ws, payload) {
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify(payload));
+  }
+}
+
+function sendStationFeedTick(ws, config, clockMinute) {
+  const tt = getTimetable(config.timetableId);
+  if (!tt) {
+    sendWsJson(ws, { type: 'error', error: 'Timetable not found' });
+    return;
+  }
+  const board = buildStationBoard(tt, config.stationName, config.direction, config.trainIdFilter, config.trainTypeFilter);
+  if (board.error) {
+    sendWsJson(ws, { type: 'error', error: board.error });
+    return;
+  }
+
+  if (!Number.isFinite(clockMinute)) return;
+  const services = board.services
+    .map((svc) => {
+      const eventMinute = minuteFromTime(svc.eventTime);
+      const minutesUntil = eventMinute == null ? null : eventMinute - clockMinute;
+      return { ...svc, minutesUntil };
+    })
+    .filter((svc) => svc.minutesUntil != null && svc.minutesUntil >= 0)
+    .slice(0, config.futureCount);
+
+  sendWsJson(ws, {
+    type: 'stationFeed',
+    timetableId: config.timetableId,
+    stationName: board.stationName,
+    direction: board.direction,
+    clockTime: formatClockMinute(clockMinute),
+    source: 'mqtt',
+    clockTopic: config.clockTopic,
+    futureCount: config.futureCount,
+    services,
+    generatedAt: new Date().toISOString(),
+  });
+}
 
 // ── JMRI clock script download ────────────────────────────────
 
@@ -832,6 +1054,129 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: clientError ? err.message : 'Internal server error' });
 });
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+const wsServer = new WebSocketServer({ noServer: true });
+
+wsServer.on('connection', (ws, req) => {
+  const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const timetableId = String(reqUrl.searchParams.get('id') || '').trim();
+  const stationName = String(reqUrl.searchParams.get('station') || '').trim();
+  const direction = parseDirection(reqUrl.searchParams.get('direction'));
+  const trainIdFilter = parseTrainIdFilter(reqUrl.searchParams.get('trainId'));
+  const trainTypeFilter = parseTrainIdFilter(reqUrl.searchParams.get('trainType'));
+  const futureCount = Math.max(1, Math.min(100, Number(reqUrl.searchParams.get('futureCount')) || 10));
+
+  if (!timetableId || !stationName || direction === null) {
+    sendWsJson(ws, {
+      type: 'error',
+      error: 'Expected query: id=<timetableId>&station=<stationName>[&direction=up|down][&trainId=%pattern%][&trainType=%pattern%][&futureCount=10]',
+    });
+    ws.close(1008, 'Invalid query');
+    return;
+  }
+
+  const tt = getTimetable(timetableId);
+  if (!tt) {
+    sendWsJson(ws, { type: 'error', error: 'Timetable not found' });
+    ws.close(1008, 'Timetable not found');
+    return;
+  }
+  const settings = { ...DEFAULT_SETTINGS, ...(tt.settings || {}) };
+  if (!settings.clock_enabled || !settings.clock_broker_url || !settings.clock_topic) {
+    sendWsJson(ws, {
+      type: 'error',
+      error: 'Fast clock is not configured for this timetable. Set clock_enabled, clock_broker_url, and clock_topic in timetable settings.',
+    });
+    ws.close(1008, 'Clock not configured');
+    return;
+  }
+
+  const config = {
+    timetableId,
+    stationName,
+    direction,
+    trainIdFilter,
+    trainTypeFilter,
+    clockTopic: settings.clock_topic,
+    futureCount,
+  };
+
+  const mqttClient = mqtt.connect(settings.clock_broker_url, {
+    reconnectPeriod: 5000,
+    protocolVersion: 4,
+    clean: true,
+    clientId: `liverun_ws_${Math.random().toString(16).slice(2, 10)}`,
+  });
+  let lastClockMinute = null;
+
+  sendWsJson(ws, {
+    type: 'hello',
+    message: 'Connected. Waiting for fast clock MQTT updates to push station feed snapshots.',
+    clockTopic: settings.clock_topic,
+    brokerUrl: settings.clock_broker_url,
+  });
+
+  mqttClient.on('connect', () => {
+    sendWsJson(ws, { type: 'mqtt', status: 'connected', topic: settings.clock_topic });
+    mqttClient.subscribe(settings.clock_topic, { qos: 0 }, (err) => {
+      if (err) {
+        sendWsJson(ws, { type: 'error', error: `MQTT subscribe failed: ${err.message}` });
+      }
+    });
+  });
+
+  mqttClient.on('message', (topic, message) => {
+    if (topic !== settings.clock_topic) return;
+    const minute = parseClockMinuteFromPayload(message.toString());
+    if (minute == null) return;
+    if (minute === lastClockMinute) return;
+    lastClockMinute = minute;
+    sendStationFeedTick(ws, config, minute);
+  });
+
+  mqttClient.on('error', (err) => {
+    sendWsJson(ws, { type: 'error', error: `MQTT error: ${err.message}` });
+  });
+
+  mqttClient.on('close', () => {
+    sendWsJson(ws, { type: 'mqtt', status: 'disconnected', topic: settings.clock_topic });
+  });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      sendWsJson(ws, { type: 'error', error: 'Invalid JSON message' });
+      return;
+    }
+
+    if (msg && msg.type === 'ping') {
+      sendWsJson(ws, { type: 'pong', at: new Date().toISOString() });
+      return;
+    }
+
+    sendWsJson(ws, { type: 'error', error: 'Unsupported message type' });
+  });
+
+  ws.on('close', () => {
+    mqttClient.end(true);
+  });
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const targetPath = reqUrl.pathname;
+  const basePathTarget = BASE_PATH ? `${BASE_PATH}${WS_STATION_FEED_PATH}` : null;
+  if (targetPath !== WS_STATION_FEED_PATH && targetPath !== basePathTarget) {
+    socket.destroy();
+    return;
+  }
+  wsServer.handleUpgrade(req, socket, head, (ws) => {
+    wsServer.emit('connection', ws, req);
+  });
+});
+
+server.listen(PORT, () => {
   console.log('Train Graph server listening on http://localhost:' + PORT);
 });

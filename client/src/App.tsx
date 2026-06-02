@@ -826,6 +826,8 @@ export default function App() {
                       clockStatus={clockStatus}
                       clockError={clockError}
                       onClose={() => setSettingsOpen(false)}
+                      timetableId={selectedId ?? undefined}
+                      firstStationName={timetable.stations?.[0]?.name}
                     />
                   )}
                 </div>
