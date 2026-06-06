@@ -1,6 +1,6 @@
 {
   "name": "train-graph",
-  "version": "1.10.0-beta",
+  "version": "1.11.0",
   "private": true,
   "workspaces": [
     "server",
