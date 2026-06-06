@@ -24,6 +24,8 @@ export interface Station {
   /** Optional branch name. Stations sharing a branch_name are grouped and
    *  shown indented on the graph with a collapse/expand toggle. */
   branch_name: string | null;
+  /** When true, the per-train location alias field is shown in the train editor. */
+  alias_enabled?: boolean;
 }
 
 export interface TrainStop {
@@ -33,6 +35,7 @@ export interface TrainStop {
   arrival: string | null;
   departure: string | null;
   special_instructions?: string;
+  location_alias?: string | null;
 }
 
 export interface Crew {
@@ -96,6 +99,7 @@ export interface StopRequest {
   arrival: string | null;
   departure: string | null;
   specialInstructions?: string;
+  locationAlias?: string;
 }
 
 export interface TrainRequest {

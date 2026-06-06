@@ -50,11 +50,11 @@ function buildTrainPoints(
     const st = stationMap.get(stop.station_id);
     if (!st) continue;
     if (stop.arrival)
-      entries.push({ stop, timeMin: timeToMinutes(stop.arrival), isArrival: true, graphPos: st.graph_pos, stationName: st.name });
+      entries.push({ stop, timeMin: timeToMinutes(stop.arrival), isArrival: true, graphPos: st.graph_pos, stationName: stop.location_alias || st.name });
     if (stop.departure && stop.departure !== stop.arrival)
-      entries.push({ stop, timeMin: timeToMinutes(stop.departure), isArrival: false, graphPos: st.graph_pos, stationName: st.name });
+      entries.push({ stop, timeMin: timeToMinutes(stop.departure), isArrival: false, graphPos: st.graph_pos, stationName: stop.location_alias || st.name });
     if (stop.departure && !stop.arrival)
-      entries.push({ stop, timeMin: timeToMinutes(stop.departure), isArrival: false, graphPos: st.graph_pos, stationName: st.name });
+      entries.push({ stop, timeMin: timeToMinutes(stop.departure), isArrival: false, graphPos: st.graph_pos, stationName: stop.location_alias || st.name });
   }
 
   entries.sort((a, b) => a.timeMin !== b.timeMin ? a.timeMin - b.timeMin : (a.isArrival ? -1 : 1));

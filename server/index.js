@@ -170,6 +170,7 @@ app.post('/api/timetables/import', (req, res) => {
           arrival: stop.arrival ? String(stop.arrival) : null,
           departure: stop.departure ? String(stop.departure) : null,
           special_instructions: stop.special_instructions ? String(stop.special_instructions) : null,
+          location_alias: stop.location_alias ? String(stop.location_alias) : null,
         })),
       };
     }),
@@ -279,9 +280,8 @@ app.post('/api/timetables/:id/restore', (req, res) => {
         arrival: s.arrival ? String(s.arrival) : null,
         departure: s.departure ? String(s.departure) : null,
         special_instructions: s.special_instructions ? String(s.special_instructions) : null,
+        location_alias: s.location_alias ? String(s.location_alias) : null,
       })),
-    }));
-    if (Array.isArray(paths)) tt.paths = paths.map((p) => ({
       id: String(p.id),
       timetable_id: ttId,
       name: String(p.name || '').trim(),
@@ -327,7 +327,7 @@ app.put('/api/timetables/:id/settings', (req, res) => {
 });
 
 app.post('/api/timetables/:id/stations', (req, res) => {
-  const { name, shortCode, distance, graphPos, branchName, pushDown } = req.body;
+  const { name, shortCode, distance, graphPos, branchName, pushDown, aliasEnabled } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (graphPos == null || graphPos === '') return res.status(400).json({ error: 'graphPos is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
@@ -345,6 +345,7 @@ app.post('/api/timetables/:id/stations', (req, res) => {
       graph_pos: newPos,
       sort_order: maxOrder + 1,
       branch_name: (branchName && String(branchName).trim()) ? String(branchName).trim() : null,
+      alias_enabled: Boolean(aliasEnabled),
     });
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -352,7 +353,7 @@ app.post('/api/timetables/:id/stations', (req, res) => {
 });
 
 app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
-  const { name, shortCode, distance, graphPos, sortOrder, branchName, pushDown } = req.body;
+  const { name, shortCode, distance, graphPos, sortOrder, branchName, pushDown, aliasEnabled } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
     const st = tt.stations.find((s) => s.id === req.params.stationId);
@@ -376,6 +377,7 @@ app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
       }
       st.sort_order = sortOrder != null ? sortOrder : st.sort_order;
       st.branch_name = (branchName && String(branchName).trim()) ? String(branchName).trim() : null;
+      st.alias_enabled = Boolean(aliasEnabled);
     }
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -588,6 +590,7 @@ function buildStops(trainId, stops) {
       id: uuidv4(), train_id: trainId, station_id: s.stationId,
       arrival: s.arrival || null, departure: s.departure || null,
       special_instructions: s.specialInstructions || null,
+      location_alias: s.locationAlias || null,
     }));
   return stripTerminalTimes(built);
 }

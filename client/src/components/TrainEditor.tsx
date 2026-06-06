@@ -9,6 +9,7 @@ interface StopForm {
   departure: string;
   dwell: string; // minutes, used to compute departure and cascade
   specialInstructions: string;
+  locationAlias: string;
 }
 
 interface Props {
@@ -81,6 +82,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
         arrival: s.arrival || null,
         departure: s.departure || null,
         special_instructions: s.specialInstructions || undefined,
+        location_alias: s.locationAlias || null,
       }));
 
     return {
@@ -191,6 +193,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
           departure: existing?.departure ?? '',
           dwell: existing?.dwell ?? '',
           specialInstructions: existing?.specialInstructions ?? '',
+          locationAlias: existing?.locationAlias ?? '',
         };
       });
     setStops(newStops);
@@ -249,6 +252,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
         arrival: s.stationId === firstTimedId ? null : (s.arrival || null),
         departure: s.stationId === lastTimedId ? null : (s.departure || null),
         specialInstructions: s.specialInstructions || undefined,
+        locationAlias: s.locationAlias || undefined,
       }));
 
     onSave({ id: train?.id, name: name.trim(), color, notes, trainType, trainId: trainIdField, direction, crewId: crewId || undefined, stops: saveStops });
@@ -263,6 +267,28 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
     const sorted = [...timedStopsForOrder].sort((a, b) => stopMinutes(a) - stopMinutes(b));
     return [sorted[0].stationId, sorted[sorted.length - 1].stationId];
   })();
+
+  // Keep form state consistent with the terminal-stop rule: whenever the first
+  // or last timed stop changes, clear the disallowed field so there is no
+  // hidden stale value that could be saved.
+  useEffect(() => {
+    if (!firstTimedId && !lastTimedId) return;
+    setStops((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (s.stationId === firstTimedId && s.arrival) {
+          changed = true;
+          return { ...s, arrival: '' };
+        }
+        if (s.stationId === lastTimedId && (s.departure || s.dwell)) {
+          changed = true;
+          return { ...s, departure: '', dwell: '' };
+        }
+        return s;
+      });
+      return changed ? next : prev;
+    });
+  }, [firstTimedId, lastTimedId]);
 
   return (
     <>
@@ -468,9 +494,25 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
                     {/* Times row */}
                     <div className="grid grid-cols-[1fr_100px_100px_58px] gap-0">
                     {/* Station cell */}
-                    <div className="px-3 py-2 flex flex-col justify-center">
+                    <div className="px-3 py-2 flex flex-col justify-center gap-0.5">
                       <span className="text-sm text-slate-300">{stop.stationName}</span>
                       <span className="text-xs text-slate-600">{stop.distance != null ? `${stop.distance} ${distanceUnit ?? 'km'}` : ''}</span>
+                      {sorted.find((s) => s.id === stop.stationId)?.alias_enabled && (stop.arrival || stop.departure || stop.locationAlias) && (
+                        <input
+                          type="text"
+                          value={stop.locationAlias}
+                          onChange={(e) =>
+                            setStops((prev) =>
+                              prev.map((s, i) =>
+                                i === idx ? { ...s, locationAlias: e.target.value } : s
+                              )
+                            )
+                          }
+                          placeholder="Alias…"
+                          title="Location alias — overrides the station name in reports and tooltips for this train"
+                          className="bg-transparent text-xs text-sky-300 focus:outline-none focus:bg-slate-700/50 px-1 py-0.5 rounded border border-slate-700/50 focus:border-sky-500/50 placeholder:text-slate-700 w-full"
+                        />
+                      )}
                     </div>
 
                     {/* Arrival — hidden for first timed stop (departure only) */}
@@ -620,6 +662,7 @@ function buildStopForms(stations: Station[], existingStops?: TrainStop[]): StopF
       departure: existing?.departure ?? '',
       dwell: '',
       specialInstructions: existing?.special_instructions ?? '',
+      locationAlias: existing?.location_alias ?? '',
     };
   });
 }

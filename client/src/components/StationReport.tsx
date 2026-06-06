@@ -24,6 +24,10 @@ interface ReportRow {
   trainNotes: string;
   specialInstructions: string;
   color: string;
+  origin: string;
+  originReal: string;
+  destination: string;
+  destinationReal: string;
 }
 
 function minutesOf(t: string | null | undefined): number {
@@ -44,7 +48,7 @@ function buildPrintHtml(
   rows: ReportRow[],
 ): string {
   const tableRows = rows.length === 0
-    ? `<tr><td colspan="5">No trains scheduled at this location.</td></tr>`
+    ? `<tr><td colspan="7">No trains scheduled at this location.</td></tr>`
     : rows.map((row, i) => {
         const name = `${escapeHtml(row.trainName)} ${serviceTag(row.serviceType)}`;
         const instr = row.specialInstructions ? `! ${escapeHtml(row.specialInstructions)}` : '';
@@ -53,6 +57,8 @@ function buildPrintHtml(
         const depCell = row.serviceType !== 'terminates' ? escapeHtml(timeLabel(row.departure)) : '';
         return `<tr style="${rowStyle}">
           <td>${name}</td>
+          <td>${escapeHtml(row.origin)}${row.origin !== row.originReal ? `<br/><span style="font-size:5pt;color:#888;">${escapeHtml(row.originReal)}</span>` : ''}</td>
+          <td>${escapeHtml(row.destination)}${row.destination !== row.destinationReal ? `<br/><span style="font-size:5pt;color:#888;">${escapeHtml(row.destinationReal)}</span>` : ''}</td>
           <td style="text-align:center;">${arrCell}</td>
           <td style="text-align:center;">${depCell}</td>
           <td>${escapeHtml(row.trainNotes || '')}</td>
@@ -99,11 +105,13 @@ function buildPrintHtml(
   <table>
     <thead>
       <tr>
-        <th style="width:14%;">TRAIN</th>
-        <th style="width:7%;text-align:center;">ARR</th>
-        <th style="width:7%;text-align:center;">DEP</th>
-        <th style="width:33%;">NOTES</th>
-        <th style="width:39%;">INSTRUCTIONS</th>
+        <th style="width:12%;">TRAIN</th>
+        <th style="width:12%;">ORIGIN</th>
+        <th style="width:12%;">DEST</th>
+        <th style="width:6%;text-align:center;">ARR</th>
+        <th style="width:6%;text-align:center;">DEP</th>
+        <th style="width:25%;">NOTES</th>
+        <th style="width:27%;">INSTRUCTIONS</th>
       </tr>
     </thead>
     <tbody>${tableRows}</tbody>
@@ -122,6 +130,8 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
 
   const station = timetable.stations.find((s) => s.id === stationId);
 
+  const stationNameById = Object.fromEntries(timetable.stations.map((s) => [s.id, s.name]));
+
   const rows: ReportRow[] = timetable.trains
     .flatMap((train) => {
       const stop = train.stops.find((s) => s.station_id === stationId);
@@ -129,6 +139,14 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
       const serviceType: ServiceType =
         !stop.arrival && stop.departure ? 'originates' :
         stop.arrival && !stop.departure ? 'terminates' : 'calls';
+
+      // Origin = first timed stop (departure only); destination = last timed stop (arrival only)
+      const timedStops = [...train.stops].sort(
+        (a, b) => minutesOf(a.departure ?? a.arrival) - minutesOf(b.departure ?? b.arrival)
+      );
+      const originStop = timedStops.find((s) => !s.arrival && s.departure) ?? timedStops[0];
+      const destStop = [...timedStops].reverse().find((s) => s.arrival && !s.departure) ?? timedStops[timedStops.length - 1];
+
       return [{
         trainId: train.id,
         trainName: train.name,
@@ -139,6 +157,10 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
         trainNotes: train.notes ?? '',
         specialInstructions: stop.special_instructions ?? '',
         color: train.color,
+        origin: originStop?.location_alias || stationNameById[originStop?.station_id ?? ''] || '—',
+        originReal: stationNameById[originStop?.station_id ?? ''] || '—',
+        destination: destStop?.location_alias || stationNameById[destStop?.station_id ?? ''] || '—',
+        destinationReal: stationNameById[destStop?.station_id ?? ''] || '—',
       }];
     })
     .sort((a, b) => minutesOf(a.arrival ?? a.departure) - minutesOf(b.arrival ?? b.departure));
@@ -155,7 +177,7 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
     <>
       <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh]">
+        <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-5xl flex flex-col max-h-[85vh]">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 shrink-0">
             <div>
@@ -197,6 +219,8 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
                 <thead>
                   <tr className="text-xs text-slate-500 uppercase tracking-wide border-b border-slate-800">
                     <th className="text-left pb-2 pr-4 font-medium">Train</th>
+                    <th className="text-left pb-2 pr-4 font-medium">Origin</th>
+                    <th className="text-left pb-2 pr-4 font-medium">Destination</th>
                     <th className="text-left pb-2 pr-4 font-medium">Arrives</th>
                     <th className="text-left pb-2 pr-4 font-medium">Departs</th>
                     <th className="text-left pb-2 pr-4 font-medium">Notes</th>
@@ -216,6 +240,18 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
                           <ServiceBadge type={row.serviceType} />
                         </div>
 
+                      </td>
+                      <td className="py-3 pr-4 text-xs whitespace-nowrap">
+                        <span className="text-slate-200 font-medium">{row.origin}</span>
+                        {row.origin !== row.originReal && (
+                          <div className="text-slate-500 text-[10px]">{row.originReal}</div>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-xs whitespace-nowrap">
+                        <span className="text-slate-200 font-medium">{row.destination}</span>
+                        {row.destination !== row.destinationReal && (
+                          <div className="text-slate-500 text-[10px]">{row.destinationReal}</div>
+                        )}
                       </td>
                       <td className="py-3 pr-4 font-mono text-slate-300 whitespace-nowrap">
                         {row.serviceType !== 'originates' ? timeLabel(row.arrival) : ''}
