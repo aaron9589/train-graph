@@ -149,9 +149,13 @@ function buildFullTimetableHtml(timetable: Timetable): string {
     td { font-size: 8pt; line-height: 1.2; border: 1px solid #aaa; padding: 2px 5px; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     td:first-child, th:first-child { white-space: normal; min-width: 80px; max-width: 110px; }
     tr { page-break-inside: avoid; }
+    .print-btn { display:inline-flex; align-items:center; gap:6px; margin-bottom:10px; padding:6px 14px; background:#1d4ed8; color:#fff; border:none; border-radius:4px; font-size:9pt; font-family:Arial,sans-serif; cursor:pointer; }
+    .print-btn:hover { background:#1e40af; }
+    @media print { .print-btn { display:none; } }
   </style>
 </head>
 <body>
+<button class="print-btn" onclick="window.print()"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print</button>
 ${pagesHtml}
 </body>
 </html>`;
@@ -640,9 +644,13 @@ export default function App() {
     body { background: #ffffff; color: #111827; font-family: Arial, sans-serif; padding: 0.25in; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     h2 { font-size: 9pt; font-weight: normal; color: #374151; margin-bottom: 6px; }
     svg { width: 100%; height: auto; display: block; }
+    .print-btn { display:inline-flex; align-items:center; gap:6px; margin-bottom:10px; padding:6px 14px; background:#1d4ed8; color:#fff; border:none; border-radius:4px; font-size:9pt; font-family:Arial,sans-serif; cursor:pointer; }
+    .print-btn:hover { background:#1e40af; }
+    @media print { .print-btn { display:none; } }
   </style>
 </head>
 <body>
+  <button class="print-btn" onclick="window.print()"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print</button>
   <h2>${escapeHtml(timetable.name)} \u2014 Train Graph</h2>
   ${svgContent}
 </body>

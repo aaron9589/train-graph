@@ -540,14 +540,56 @@ function buildPathStops(pathId, stops) {
   }));
 }
 
-function buildStops(trainId, stops) {
+/**
+ * Enforce terminal stop convention:
+ *   - first (origin) stop:      departure only  — arrival is stripped (or moved if that's all there is)
+ *   - last (destination) stop:  arrival only    — departure is stripped (or moved if that's all there is)
+ *
+ * Also removes any stops that ended up with both times null (e.g. from a
+ * previous buggy migration run).
+ */
+function stripTerminalTimes(stops) {
+  if (!stops || stops.length === 0) return stops;
+  function stopMins(s) {
+    const t = s.departure || s.arrival;
+    if (!t) return Infinity;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+  // Only consider stops that actually have a time when finding first/last
+  const timedStops = stops.filter((s) => s.arrival || s.departure);
+  if (timedStops.length === 0) return stops;
+  const sorted = [...timedStops].sort((a, b) => stopMins(a) - stopMins(b));
+  const firstId = sorted[0]?.id ?? sorted[0]?.station_id;
+  const lastId  = sorted[sorted.length - 1]?.id ?? sorted[sorted.length - 1]?.station_id;
+  if (firstId === lastId) return stops; // single-stop train — nothing to strip
   return stops
+    .map((s) => {
+      const key = s.id ?? s.station_id;
+      if (key === firstId) {
+        // Origin: departure only. If the stop only has arrival (mis-entered), move it to departure.
+        const dep = s.departure || s.arrival;
+        return { ...s, arrival: null, departure: dep };
+      }
+      if (key === lastId) {
+        // Destination: arrival only. If the stop only has departure (mis-entered), move it to arrival.
+        const arr = s.arrival || s.departure;
+        return { ...s, arrival: arr, departure: null };
+      }
+      return s;
+    })
+    .filter((s) => s.arrival || s.departure); // drop any null-null stops
+}
+
+function buildStops(trainId, stops) {
+  const built = stops
     .filter((s) => s.arrival || s.departure)
     .map((s) => ({
       id: uuidv4(), train_id: trainId, station_id: s.stationId,
       arrival: s.arrival || null, departure: s.departure || null,
       special_instructions: s.specialInstructions || null,
     }));
+  return stripTerminalTimes(built);
 }
 
 function normTime(t) {
@@ -570,11 +612,13 @@ function normalise(tt) {
     ),
     trains: (tt.trains ?? []).map((tr) => ({
       ...tr,
-      stops: (tr.stops ?? []).map((s) => ({
-        ...s,
-        arrival: normTime(s.arrival),
-        departure: normTime(s.departure),
-      })),
+      stops: stripTerminalTimes(
+        (tr.stops ?? []).map((s) => ({
+          ...s,
+          arrival: normTime(s.arrival),
+          departure: normTime(s.departure),
+        }))
+      ),
     })),
   };
 }
@@ -1239,6 +1283,32 @@ server.on('upgrade', (req, socket, head) => {
     wsServer.emit('connection', ws, req);
   });
 });
+
+// ── Startup migration: normalise terminal stop times ─────────────────────────
+// Runs once on every container start. Strips arrival from each train's first
+// stop and departure from its last stop across all timetables, so any data
+// created before this rule was enforced is brought into compliance.
+(function migrateTerminalTimes() {
+  const db = readDB();
+  let changed = 0;
+  for (const tt of db.timetables) {
+    for (const tr of (tt.trains ?? [])) {
+      const original = JSON.stringify(tr.stops);
+      tr.stops = stripTerminalTimes(
+        (tr.stops ?? []).map((s) => ({
+          ...s,
+          arrival: normTime(s.arrival),
+          departure: normTime(s.departure),
+        }))
+      );
+      if (JSON.stringify(tr.stops) !== original) changed++;
+    }
+  }
+  if (changed > 0) {
+    writeDB(db);
+    console.log(`Startup migration: normalised terminal stop times on ${changed} train(s).`);
+  }
+})();
 
 server.listen(PORT, () => {
   console.log('Train Graph server listening on http://localhost:' + PORT);
