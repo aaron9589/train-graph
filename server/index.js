@@ -871,6 +871,7 @@ function buildStationBoard(tt, stationNameParam, directionQuery, trainIdFilter, 
         const stopStation = stationMap.get(stop.station_id);
         return {
           stopName: stopStation ? stopStation.name : stop.station_id,
+          locationAlias: stop.location_alias || null,
           arrival: stop.arrival || null,
           departure: stop.departure || null,
           specialInstructions: stop.special_instructions || null,
@@ -946,6 +947,7 @@ app.get('/api/timetables/:id/live/trains/:trainName', (req, res) => {
     const station = stationMap.get(stop.station_id);
     return {
       stopName: station ? station.name : stop.station_id,
+      locationAlias: stop.location_alias || null,
       arrival: stop.arrival || null,
       departure: stop.departure || null,
       specialInstructions: stop.special_instructions || null,
