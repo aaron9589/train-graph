@@ -58,6 +58,7 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
   function cancelAll() {
     setEditingId(null);
     setAddForm(null);
+    setPushDown(false);
     setError('');
   }
 

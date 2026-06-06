@@ -167,8 +167,7 @@ export default function App() {
   const [timetable, setTimetable] = useState<Timetable | null>(null);
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
-  const [importWarnings, setImportWarnings] = useState<string[] | null>(null);
-  /** Live draft of train being edited – merged into graph for real-time preview */
+/** Live draft of train being edited – merged into graph for real-time preview */
   const [draftTrain, setDraftTrain] = useState<Train | null>(null);
 
   // ── Sidebar + undo/redo ───────────────────────────────────────
@@ -580,13 +579,10 @@ export default function App() {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const imported = await api.importTimetable(data) as Timetable & { _import_warnings?: string[] };
+      const imported = await api.importTimetable(data);
       const list = await refreshList();
       const found = list.find((t) => t.id === imported.id);
       if (found) setSelectedId(found.id);
-      if (imported._import_warnings && imported._import_warnings.length > 0) {
-        setImportWarnings(imported._import_warnings);
-      }
     } catch (err) {
       console.error('Import failed:', err);
       alert('Failed to import timetable. Make sure the file is a valid timetable JSON export.');
@@ -854,27 +850,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* Import compatibility warning banner */}
-        {importWarnings && importWarnings.length > 0 && (
-          <div className="shrink-0 bg-amber-950 border-b border-amber-700 px-4 py-2.5 flex items-start gap-3">
-            <span className="text-amber-400 text-sm shrink-0 mt-0.5">⚠</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-amber-300 text-sm font-medium">
-                Station positions adjusted for compatibility
-              </p>
-              <ul className="mt-1 space-y-0.5">
-                {importWarnings.map((w, i) => (
-                  <li key={i} className="text-amber-400/80 text-xs">{w}</li>
-                ))}
-              </ul>
-            </div>
-            <button
-              onClick={() => setImportWarnings(null)}
-              className="shrink-0 text-amber-600 hover:text-amber-400 text-sm leading-none mt-0.5"
-              title="Dismiss"
-            >✕</button>
-          </div>
-        )}
 
         {/* Graph */}
         <div className="flex-1 overflow-hidden relative">

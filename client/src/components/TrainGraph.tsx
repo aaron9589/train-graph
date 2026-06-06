@@ -544,7 +544,7 @@ export function TrainGraph({
                   <polyline points={ptStr} fill="none" stroke="transparent" strokeWidth="12" />
                   {isHovered && <polyline points={ptStr} fill="none" stroke={train.color} strokeWidth="6" strokeOpacity="0.25" />}
                   <polyline points={ptStr} fill="none" stroke={train.color} strokeWidth={isHovered ? 2.5 : 2} strokeLinejoin="round" strokeLinecap="round" />
-                  {points.filter((_, i, arr) => i > 0 && arr[i - 1].y === arr[i].y).map((p, i) => (
+                  {points.map((p, i) => (
                     <circle key={i} cx={p.x} cy={p.y} r="2.5" fill={train.color} />
                   ))}
                 </g>

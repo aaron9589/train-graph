@@ -282,6 +282,8 @@ app.post('/api/timetables/:id/restore', (req, res) => {
         special_instructions: s.special_instructions ? String(s.special_instructions) : null,
         location_alias: s.location_alias ? String(s.location_alias) : null,
       })),
+    }));
+    if (Array.isArray(paths)) tt.paths = paths.map((p) => ({
       id: String(p.id),
       timetable_id: ttId,
       name: String(p.name || '').trim(),
@@ -569,12 +571,14 @@ function stripTerminalTimes(stops) {
     .map((s) => {
       const key = s.id ?? s.station_id;
       if (key === firstId) {
-        // Origin: departure only. If the stop only has arrival (mis-entered), move it to departure.
+        // Origin: departure only — unless the stop has a meaningful dwell (arrival ≠ departure).
+        if (s.arrival && s.departure && s.arrival !== s.departure) return s;
         const dep = s.departure || s.arrival;
         return { ...s, arrival: null, departure: dep };
       }
       if (key === lastId) {
-        // Destination: arrival only. If the stop only has departure (mis-entered), move it to arrival.
+        // Destination: arrival only — unless the stop has a meaningful dwell (arrival ≠ departure).
+        if (s.arrival && s.departure && s.arrival !== s.departure) return s;
         const arr = s.arrival || s.departure;
         return { ...s, arrival: arr, departure: null };
       }

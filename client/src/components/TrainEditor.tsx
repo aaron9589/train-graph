@@ -170,6 +170,18 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
     );
   }
 
+  function handleStopBlur(idx: number) {
+    // If this is the first timed stop and arrival == departure, drop arrival (redundant at origin)
+    setStops((prev) => {
+      const s = prev[idx];
+      if (!s.arrival || !s.departure || s.arrival !== s.departure) return prev;
+      const timed = prev.filter((r) => r.arrival || r.departure);
+      const firstId = [...timed].sort((a, b) => stopMinutes(a) - stopMinutes(b))[0]?.stationId;
+      if (s.stationId !== firstId) return prev;
+      return prev.map((r, i) => i === idx ? { ...r, arrival: '' } : r);
+    });
+  }
+
   function handlePathChange(pathId: string) {
     const pid = pathId || null;
     setSelectedPathId(pid);
@@ -246,14 +258,18 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
     const sortedByTime = [...timedStops].sort((a, b) => stopMinutes(a) - stopMinutes(b));
     const firstTimedId = sortedByTime[0]?.stationId;
     const lastTimedId = sortedByTime[sortedByTime.length - 1]?.stationId;
-    const saveStops = timedStops.map((s) => ({
+    const saveStops = timedStops.map((s) => {
+      // Stops with a true dwell (arrival and departure differ) keep both times
+      // even at terminal positions. Same arrival == departure is treated as terminal.
+      const hasDwell = !!(s.arrival && s.departure && s.arrival !== s.departure);
+      return {
         stationId: s.stationId,
-        // First timed stop departs only; last timed stop arrives only
-        arrival: s.stationId === firstTimedId ? null : (s.arrival || null),
-        departure: s.stationId === lastTimedId ? null : (s.departure || null),
+        arrival: (s.stationId === firstTimedId && !hasDwell) ? null : (s.arrival || null),
+        departure: (s.stationId === lastTimedId && !hasDwell) ? null : (s.departure || null),
         specialInstructions: s.specialInstructions || undefined,
         locationAlias: s.locationAlias || undefined,
-      }));
+      };
+    });
 
     onSave({ id: train?.id, name: name.trim(), color, notes, trainType, trainId: trainIdField, direction, crewId: crewId || undefined, stops: saveStops });
   }
@@ -271,16 +287,18 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
   // Keep form state consistent with the terminal-stop rule: whenever the first
   // or last timed stop changes, clear the disallowed field so there is no
   // hidden stale value that could be saved.
+  // Exception: stops with a dwell (both arrival and departure) are preserved —
+  // the dwell is intentional and should not be stripped.
   useEffect(() => {
     if (!firstTimedId && !lastTimedId) return;
     setStops((prev) => {
       let changed = false;
       const next = prev.map((s) => {
-        if (s.stationId === firstTimedId && s.arrival) {
+        if (s.stationId === firstTimedId && s.arrival && (!s.departure || s.arrival === s.departure)) {
           changed = true;
           return { ...s, arrival: '' };
         }
-        if (s.stationId === lastTimedId && (s.departure || s.dwell)) {
+        if (s.stationId === lastTimedId && (s.departure || s.dwell) && !s.arrival) {
           changed = true;
           return { ...s, departure: '', dwell: '' };
         }
@@ -515,36 +533,37 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
                       )}
                     </div>
 
-                    {/* Arrival — hidden for first timed stop (departure only) */}
+                    {/* Arrival — hidden for first timed stop unless it has a dwell */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      {stop.stationId === firstTimedId ? (
+                      {stop.stationId === firstTimedId && !stop.departure ? (
                         <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="First stop is departure only">—</span>
                       ) : (
                         <TimeInput
                           value={stop.arrival}
                           onChange={(v) => updateStop(idx, 'arrival', v)}
-                          onBlur={() => inferDeparture(idx)}
+                          onBlur={() => { inferDeparture(idx); handleStopBlur(idx); }}
                           className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
                         />
                       )}
                     </div>
 
-                    {/* Departure — hidden for last timed stop (arrival only) */}
+                    {/* Departure — hidden for last timed stop unless it has a dwell */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      {stop.stationId === lastTimedId ? (
+                      {stop.stationId === lastTimedId && !stop.arrival ? (
                         <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="Last stop is arrival only">—</span>
                       ) : (
                         <TimeInput
                           value={stop.departure}
                           onChange={(v) => updateStop(idx, 'departure', v)}
+                          onBlur={() => handleStopBlur(idx)}
                           className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
                         />
                       )}
                     </div>
 
-                    {/* Dwell — hidden for last stop (no departure to compute against) */}
+                    {/* Dwell — hidden for last stop unless it has a dwell (both times) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      {stop.stationId === lastTimedId ? (
+                      {stop.stationId === lastTimedId && !stop.arrival ? (
                         <span className="w-full" />
                       ) : (
                         <input

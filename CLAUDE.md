@@ -86,7 +86,7 @@ npm install       # install all workspaces
 npm run dev       # Vite (5173) + Express (3001) concurrently
 npm run build     # tsc + vite build → client/dist/
 npm run start     # Express serving client/dist/ (production)
-docker compose up -d  # production; UI at localhost:38001
+docker compose up -d  # production; UI at localhost:3001
 ```
 
 ## Environment Variables
