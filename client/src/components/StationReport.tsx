@@ -12,7 +12,7 @@ function timeLabel(t: string | null | undefined): string {
   return t ?? '—';
 }
 
-type ServiceType = 'originates' | 'terminates' | 'calls';
+type ServiceType = 'originates' | 'terminates' | 'calls' | 'passthrough';
 
 interface ReportRow {
   trainId: string;
@@ -39,6 +39,7 @@ function minutesOf(t: string | null | undefined): number {
 function serviceTag(type: ServiceType): string {
   if (type === 'originates') return '[ORG]';
   if (type === 'terminates') return '[TRM]';
+  if (type === 'passthrough') return '[PAS]';
   return '[CAL]';
 }
 
@@ -53,8 +54,10 @@ function buildPrintHtml(
         const name = `${escapeHtml(row.trainName)} ${serviceTag(row.serviceType)}`;
         const instr = row.specialInstructions ? `! ${escapeHtml(row.specialInstructions)}` : '';
         const rowStyle = i % 2 === 0 ? 'background-color:#f7f7e6;' : 'background-color:#ffffff;';
-        const arrCell = row.serviceType !== 'originates' ? escapeHtml(timeLabel(row.arrival)) : '';
-        const depCell = row.serviceType !== 'terminates' ? escapeHtml(timeLabel(row.departure)) : '';
+        const arrCell = row.serviceType === 'passthrough'
+          ? (row.arrival ? `~${escapeHtml(row.arrival)}` : '—')
+          : row.serviceType !== 'originates' ? escapeHtml(timeLabel(row.arrival)) : '';
+        const depCell = row.serviceType === 'passthrough' ? '' : row.serviceType !== 'terminates' ? escapeHtml(timeLabel(row.departure)) : '';
         return `<tr style="${rowStyle}">
           <td>${name}</td>
           <td>${escapeHtml(row.origin)}${row.origin !== row.originReal ? `<br/><span style="font-size:5pt;color:#888;">${escapeHtml(row.originReal)}</span>` : ''}</td>
@@ -117,7 +120,13 @@ function buildPrintHtml(
     <tbody>${tableRows}</tbody>
   </table>
   <div style="margin-top:4px;">
-    <small>${rows.length} train${rows.length !== 1 ? 's' : ''} scheduled</small>
+    <small>${(() => {
+      const stopping = rows.filter((r) => r.serviceType !== 'passthrough').length;
+      const passing = rows.filter((r) => r.serviceType === 'passthrough').length;
+      return passing > 0
+        ? `${stopping} stopping, ${passing} passing through`
+        : `${stopping} train${stopping !== 1 ? 's' : ''} scheduled`;
+    })()}</small>
   </div>
 </body>
 </html>`;
@@ -131,6 +140,10 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
   const station = timetable.stations.find((s) => s.id === stationId);
 
   const stationNameById = Object.fromEntries(timetable.stations.map((s) => [s.id, s.name]));
+
+  const stationGPById = Object.fromEntries(timetable.stations.map((s) => [s.id, s.graph_pos ?? 0]));
+  const targetStation = timetable.stations.find((s) => s.id === stationId);
+  const targetPos = targetStation?.graph_pos ?? null;
 
   const rows: ReportRow[] = timetable.trains
     .flatMap((train) => {
@@ -162,8 +175,62 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
         destination: destStop?.location_alias || stationNameById[destStop?.station_id ?? ''] || '—',
         destinationReal: stationNameById[destStop?.station_id ?? ''] || '—',
       }];
-    })
-    .sort((a, b) => minutesOf(a.arrival ?? a.departure) - minutesOf(b.arrival ?? b.departure));
+    });
+
+  // Detect pass-through trains: route crosses this station's graph_pos without a stop here
+  if (targetPos !== null) {
+    const stoppingTrainIds = new Set(rows.map((r) => r.trainId));
+    for (const train of timetable.trains) {
+      if (stoppingTrainIds.has(train.id)) continue;
+      const timedStops = train.stops
+        .filter((s) => s.arrival || s.departure)
+        .sort((a, b) => minutesOf(a.arrival ?? a.departure) - minutesOf(b.arrival ?? b.departure));
+      if (timedStops.length < 2) continue;
+
+      for (let i = 0; i < timedStops.length - 1; i++) {
+        const stopA = timedStops[i];
+        const stopB = timedStops[i + 1];
+        const posA = stationGPById[stopA.station_id];
+        const posB = stationGPById[stopB.station_id];
+        if (posA == null || posB == null) continue;
+        const minPos = Math.min(posA, posB);
+        const maxPos = Math.max(posA, posB);
+        if (targetPos <= minPos || targetPos >= maxPos) continue;
+
+        // Interpolate estimated pass time
+        const tAmin = minutesOf(stopA.departure ?? stopA.arrival);
+        const tBmin = minutesOf(stopB.arrival ?? stopB.departure);
+        let passTime: string | null = null;
+        if (tAmin !== Infinity && tBmin !== Infinity && posA !== posB) {
+          const fraction = (targetPos - posA) / (posB - posA);
+          const pm = Math.round(tAmin + fraction * (tBmin - tAmin));
+          passTime = `${Math.floor(pm / 60).toString().padStart(2, '0')}:${(pm % 60).toString().padStart(2, '0')}`;
+        }
+
+        const originStop = timedStops.find((s) => !s.arrival && s.departure) ?? timedStops[0];
+        const destStop = [...timedStops].reverse().find((s) => s.arrival && !s.departure) ?? timedStops[timedStops.length - 1];
+
+        rows.push({
+          trainId: train.id,
+          trainName: train.name,
+          trainRef: train.train_id ?? '',
+          arrival: passTime,
+          departure: null,
+          serviceType: 'passthrough',
+          trainNotes: train.notes ?? '',
+          specialInstructions: '',
+          color: train.color,
+          origin: originStop?.location_alias || stationNameById[originStop?.station_id ?? ''] || '—',
+          originReal: stationNameById[originStop?.station_id ?? ''] || '—',
+          destination: destStop?.location_alias || stationNameById[destStop?.station_id ?? ''] || '—',
+          destinationReal: stationNameById[destStop?.station_id ?? ''] || '—',
+        });
+        break; // one entry per train
+      }
+    }
+  }
+
+  rows.sort((a, b) => minutesOf(a.arrival ?? a.departure) - minutesOf(b.arrival ?? b.departure));
 
   function handlePrint() {
     const win = window.open('', '_blank', 'width=1100,height=700');
@@ -254,10 +321,12 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
                         )}
                       </td>
                       <td className="py-3 pr-4 font-mono text-slate-300 whitespace-nowrap">
-                        {row.serviceType !== 'originates' ? timeLabel(row.arrival) : ''}
+                        {row.serviceType === 'passthrough'
+                          ? (row.arrival ? <span className="text-slate-500">~{row.arrival}</span> : '—')
+                          : row.serviceType !== 'originates' ? timeLabel(row.arrival) : ''}
                       </td>
                       <td className="py-3 pr-4 font-mono text-slate-300 whitespace-nowrap">
-                        {row.serviceType !== 'terminates' ? timeLabel(row.departure) : ''}
+                        {row.serviceType === 'passthrough' ? '' : row.serviceType !== 'terminates' ? timeLabel(row.departure) : ''}
                       </td>
                       <td className="py-3 pr-4 text-slate-300 text-xs">
                         {row.trainNotes || <span className="text-slate-600">—</span>}
@@ -279,7 +348,13 @@ export function StationReport({ timetable, initialStationId, onClose }: Props) {
           {/* Footer */}
           <div className="px-6 py-3 border-t border-slate-800 shrink-0 flex items-center justify-between">
             <span className="text-xs text-slate-500">
-              {rows.length} train{rows.length !== 1 ? 's' : ''} scheduled
+              {(() => {
+                const stopping = rows.filter((r) => r.serviceType !== 'passthrough').length;
+                const passing = rows.filter((r) => r.serviceType === 'passthrough').length;
+                return passing > 0
+                  ? `${stopping} stopping, ${passing} passing through`
+                  : `${stopping} train${stopping !== 1 ? 's' : ''} scheduled`;
+              })()}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -312,6 +387,11 @@ function ServiceBadge({ type }: { type: ServiceType }) {
   if (type === 'terminates') return (
     <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700 shrink-0">
       Terminates
+    </span>
+  );
+  if (type === 'passthrough') return (
+    <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-500 border border-amber-800 shrink-0">
+      Not Stopping
     </span>
   );
   return (

@@ -852,6 +852,7 @@ function deriveDirectionAtStation(train, stationId, stationOrderById) {
 function buildStationBoard(tt, stationNameParam, directionQuery, trainIdFilter, trainTypeFilter) {
   const sortedStations = sortStationsForDirection(tt.stations || []);
   const stationOrderById = new Map(sortedStations.map((s, idx) => [s.id, idx]));
+  const stationGraphPosById = new Map(sortedStations.map((s) => [s.id, Number(s.graph_pos ?? 0)]));
   const trainIdMatcher = makeLikeMatcher(trainIdFilter);
   const trainTypeMatcher = makeLikeMatcher(trainTypeFilter);
   const stationNameQuery = String(stationNameParam || '').trim().toLowerCase();
@@ -861,55 +862,131 @@ function buildStationBoard(tt, stationNameParam, directionQuery, trainIdFilter, 
   }
 
   const stationMap = new Map((sortedStations || []).map((s) => [s.id, s]));
-  const services = (tt.trains || [])
-    .map((tr) => {
-      const sequencedStops = getSequencedTimedStops(tr, stationOrderById);
-      const stationStopIndex = sequencedStops.findIndex((stop) => stop.station_id === station.id);
-      if (stationStopIndex === -1) return null;
-      const stationStop = sequencedStops[stationStopIndex];
-      const derivedDirection = deriveDirectionAtStation(tr, station.id, stationOrderById);
-      if (directionQuery && derivedDirection !== directionQuery) return null;
-      if (trainIdMatcher && !trainIdMatcher.test(String(tr.train_id || ''))) return null;
-      if (trainTypeMatcher && !trainTypeMatcher.test(String(tr.train_type || ''))) return null;
-      const stoppingPattern = sequencedStops.slice(stationStopIndex).map((stop) => {
-        const stopStation = stationMap.get(stop.station_id);
-        return {
-          stopName: stopStation ? stopStation.name : stop.station_id,
-          locationAlias: stop.location_alias || null,
-          arrival: stop.arrival || null,
-          departure: stop.departure || null,
-          specialInstructions: stop.special_instructions || null,
-        };
-      });
-      const eventTime = stationStop.arrival || stationStop.departure || null;
+
+  // Trains that physically stop at this station (used to exclude from pass-through detection)
+  const stoppingTrainIds = new Set(
+    (tt.trains || [])
+      .filter((tr) => getSequencedTimedStops(tr, stationOrderById).some((s) => s.station_id === station.id))
+      .map((tr) => tr.id)
+  );
+
+  const allServices = [];
+
+  // Regular stopping services
+  for (const tr of (tt.trains || [])) {
+    const sequencedStops = getSequencedTimedStops(tr, stationOrderById);
+    const stationStopIndex = sequencedStops.findIndex((stop) => stop.station_id === station.id);
+    if (stationStopIndex === -1) continue;
+    const stationStop = sequencedStops[stationStopIndex];
+    const derivedDirection = deriveDirectionAtStation(tr, station.id, stationOrderById);
+    if (directionQuery && derivedDirection !== directionQuery) continue;
+    if (trainIdMatcher && !trainIdMatcher.test(String(tr.train_id || ''))) continue;
+    if (trainTypeMatcher && !trainTypeMatcher.test(String(tr.train_type || ''))) continue;
+    const stoppingPattern = sequencedStops.slice(stationStopIndex).map((stop) => {
+      const stopStation = stationMap.get(stop.station_id);
       return {
-        name: tr.name,
-        trainType: tr.train_type || '',
-        trainId: tr.train_id || '',
-        direction: derivedDirection || tr.direction || '',
-        notes: tr.notes || '',
-        nextCrewService: computeNextCrewService(tt, tr),
-        arrival: stationStop.arrival || null,
-        departure: stationStop.departure || null,
-        eventTime,
-        stoppingPattern,
-        _sortMinute: minuteForStop(stationStop),
+        stopName: stopStation ? stopStation.name : stop.station_id,
+        locationAlias: stop.location_alias || null,
+        arrival: stop.arrival || null,
+        departure: stop.departure || null,
+        specialInstructions: stop.special_instructions || null,
       };
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      const am = a._sortMinute == null ? Number.POSITIVE_INFINITY : a._sortMinute;
-      const bm = b._sortMinute == null ? Number.POSITIVE_INFINITY : b._sortMinute;
-      return am - bm || a.name.localeCompare(b.name);
-    })
-    .map(({ _sortMinute, ...service }) => service);
+    });
+    const eventTime = stationStop.arrival || stationStop.departure || null;
+    allServices.push({
+      name: tr.name,
+      trainType: tr.train_type || '',
+      trainId: tr.train_id || '',
+      direction: derivedDirection || tr.direction || '',
+      notes: tr.notes || '',
+      nextCrewService: computeNextCrewService(tt, tr),
+      arrival: stationStop.arrival || null,
+      departure: stationStop.departure || null,
+      eventTime,
+      stoppingPattern,
+      _sortMinute: minuteForStop(stationStop),
+    });
+  }
+
+  // Pass-through services: trains whose route crosses this station's graph_pos without stopping
+  const targetPos = stationGraphPosById.get(station.id);
+  if (targetPos != null) {
+    for (const tr of (tt.trains || [])) {
+      if (stoppingTrainIds.has(tr.id)) continue;
+      if (trainIdMatcher && !trainIdMatcher.test(String(tr.train_id || ''))) continue;
+      if (trainTypeMatcher && !trainTypeMatcher.test(String(tr.train_type || ''))) continue;
+
+      const sequencedStops = getSequencedTimedStops(tr, stationOrderById);
+      if (sequencedStops.length < 2) continue;
+
+      for (let i = 0; i < sequencedStops.length - 1; i++) {
+        const stopA = sequencedStops[i];
+        const stopB = sequencedStops[i + 1];
+        const posA = stationGraphPosById.get(stopA.station_id);
+        const posB = stationGraphPosById.get(stopB.station_id);
+        if (posA == null || posB == null) continue;
+
+        const minPos = Math.min(posA, posB);
+        const maxPos = Math.max(posA, posB);
+        if (targetPos <= minPos || targetPos >= maxPos) continue;
+
+        const derivedDirection = posA < posB ? 'down' : 'up';
+        if (directionQuery && derivedDirection !== directionQuery) continue;
+
+        // Interpolate estimated pass time between departure of A and arrival at B
+        const tAmin = minuteFromTime(stopA.departure || stopA.arrival);
+        const tBmin = minuteFromTime(stopB.arrival || stopB.departure);
+        let passTime = null;
+        let passMinute = null;
+        if (tAmin != null && tBmin != null && posA !== posB) {
+          const fraction = (targetPos - posA) / (posB - posA);
+          passMinute = Math.round(tAmin + fraction * (tBmin - tAmin));
+          passTime = formatClockMinute(passMinute);
+        }
+
+        const stoppingPattern = sequencedStops.slice(i + 1).map((stop) => {
+          const stopStation = stationMap.get(stop.station_id);
+          return {
+            stopName: stopStation ? stopStation.name : stop.station_id,
+            locationAlias: stop.location_alias || null,
+            arrival: stop.arrival || null,
+            departure: stop.departure || null,
+            specialInstructions: stop.special_instructions || null,
+          };
+        });
+
+        allServices.push({
+          name: tr.name,
+          trainType: tr.train_type || '',
+          trainId: tr.train_id || '',
+          direction: derivedDirection,
+          notes: tr.notes || '',
+          nextCrewService: computeNextCrewService(tt, tr),
+          arrival: null,
+          departure: null,
+          eventTime: passTime,
+          passTime,
+          passingThrough: true,
+          stoppingPattern,
+          _sortMinute: passMinute,
+        });
+        break; // one entry per train
+      }
+    }
+  }
 
   return {
     stationName: station.name,
     direction: directionQuery || 'all',
     trainIdFilter: trainIdFilter || null,
     trainTypeFilter: trainTypeFilter || null,
-    services,
+    services: allServices
+      .sort((a, b) => {
+        const am = a._sortMinute == null ? Number.POSITIVE_INFINITY : a._sortMinute;
+        const bm = b._sortMinute == null ? Number.POSITIVE_INFINITY : b._sortMinute;
+        return am - bm || a.name.localeCompare(b.name);
+      })
+      .map(({ _sortMinute, ...service }) => service),
   };
 }
 
