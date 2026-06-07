@@ -149,9 +149,13 @@ function buildFullTimetableHtml(timetable: Timetable): string {
     td { font-size: 8pt; line-height: 1.2; border: 1px solid #aaa; padding: 2px 5px; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     td:first-child, th:first-child { white-space: normal; min-width: 80px; max-width: 110px; }
     tr { page-break-inside: avoid; }
+    .print-btn { display:inline-flex; align-items:center; gap:6px; margin-bottom:10px; padding:6px 14px; background:#1d4ed8; color:#fff; border:none; border-radius:4px; font-size:9pt; font-family:Arial,sans-serif; cursor:pointer; }
+    .print-btn:hover { background:#1e40af; }
+    @media print { .print-btn { display:none; } }
   </style>
 </head>
 <body>
+<button class="print-btn" onclick="window.print()"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print</button>
 ${pagesHtml}
 </body>
 </html>`;
@@ -163,17 +167,22 @@ export default function App() {
   const [timetable, setTimetable] = useState<Timetable | null>(null);
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
-  /** Live draft of train being edited – merged into graph for real-time preview */
+/** Live draft of train being edited – merged into graph for real-time preview */
   const [draftTrain, setDraftTrain] = useState<Train | null>(null);
 
   // ── Sidebar + undo/redo ───────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage('tg:sidebarCollapsed', false);
   const [labelMode, setLabelMode] = useLocalStorage<'code' | 'name'>('tg:labelMode', 'code');
+  const [distanceUnit, setDistanceUnit] = useLocalStorage<'km' | 'mi'>('tg:distanceUnit', 'km');
   const [historyPast, setHistoryPast] = useState<Timetable[]>([]);
   const [historyFuture, setHistoryFuture] = useState<Timetable[]>([]);
   // Keep a ref so undo/redo callbacks can always see the latest timetable
   const timetableRef = useRef<Timetable | null>(null);
   useEffect(() => { timetableRef.current = timetable; }, [timetable]);
+  // Update window title when timetable changes
+  useEffect(() => {
+    document.title = timetable ? `LiveRun | ${timetable.name}` : 'LiveRun';
+  }, [timetable]);
   // Reset history + zoom when switching timetables
   useEffect(() => { setHistoryPast([]); setHistoryFuture([]); }, [selectedId]);
   useEffect(() => { setZoomLevel(1); setViewOffset(0); }, [selectedId]);
@@ -226,8 +235,12 @@ export default function App() {
 
   async function handleSettingsSave(updated: TimetableSettings) {
     if (!selectedId) return;
-    const result = await api.updateTimetableSettings(selectedId, updated);
-    setTimetable(result);
+    try {
+      const result = await api.updateTimetableSettings(selectedId, updated);
+      setTimetable(result);
+    } catch (e) {
+      console.error('Failed to save settings:', e);
+    }
   }
 
   function recordAndSet(updated: Timetable) {
@@ -342,6 +355,9 @@ export default function App() {
     shortCode: string;
     distance: number | null;
     graphPos: number;
+    branchName?: string | null;
+    pushDown?: boolean;
+    aliasEnabled?: boolean;
   }) {
     if (!selectedId) return;
     const updated = await api.addStation(selectedId, data);
@@ -350,7 +366,7 @@ export default function App() {
 
   async function handleUpdateStation(
     stationId: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }
   ) {
     if (!selectedId) return;
     const updated = await api.updateStation(selectedId, stationId, data);
@@ -433,7 +449,7 @@ export default function App() {
     recordAndSet(updated);
   }
 
-  async function handleAutoAssignCrews(data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean }): Promise<string[]> {
+  async function handleAutoAssignCrews(data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean; minBreakMins: number }): Promise<string[]> {
     if (!selectedId) return [];
     const result = await api.autoAssignCrews(selectedId, data);
     const { unassigned = [], ...timetable } = result as any;
@@ -629,9 +645,13 @@ export default function App() {
     body { background: #ffffff; color: #111827; font-family: Arial, sans-serif; padding: 0.25in; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     h2 { font-size: 9pt; font-weight: normal; color: #374151; margin-bottom: 6px; }
     svg { width: 100%; height: auto; display: block; }
+    .print-btn { display:inline-flex; align-items:center; gap:6px; margin-bottom:10px; padding:6px 14px; background:#1d4ed8; color:#fff; border:none; border-radius:4px; font-size:9pt; font-family:Arial,sans-serif; cursor:pointer; }
+    .print-btn:hover { background:#1e40af; }
+    @media print { .print-btn { display:none; } }
   </style>
 </head>
 <body>
+  <button class="print-btn" onclick="window.print()"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print</button>
   <h2>${escapeHtml(timetable.name)} \u2014 Train Graph</h2>
   ${svgContent}
 </body>
@@ -680,19 +700,15 @@ export default function App() {
         onAutoAssignCrews={handleAutoAssignCrews}
         onUnassignTrain={handleUnassignTrain}
         onCrewTrainHover={setHoveredCrewTrainId}
+        distanceUnit={distanceUnit}
       />
 
       {/* ── MAIN GRAPH AREA ── */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header bar */}
         <header className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900 shrink-0">
-          <span className="text-xl">🚂</span>
-          <h1 className="text-lg font-semibold tracking-tight text-white">Train Graph</h1>
           {timetable && (
-            <>
-              <span className="text-slate-600 mx-1">·</span>
-              <span className="text-slate-300 font-medium">{timetable.name}</span>
-            </>
+            <span className="text-slate-300 font-medium">{timetable.name}</span>
           )}
           <div className="ml-auto flex items-center gap-1">
             {timetable && (
@@ -821,6 +837,8 @@ export default function App() {
                     <SettingsPanel
                       labelMode={labelMode}
                       onLabelModeChange={setLabelMode}
+                      distanceUnit={distanceUnit}
+                      onDistanceUnitChange={setDistanceUnit}
                       settings={timetable.settings}
                       onSettingsSave={handleSettingsSave}
                       clockStatus={clockStatus}
@@ -835,6 +853,7 @@ export default function App() {
             )}
           </div>
         </header>
+
 
         {/* Graph */}
         <div className="flex-1 overflow-hidden relative">
@@ -860,11 +879,13 @@ export default function App() {
               timetable={displayTimetable}
               onTrainClick={(train) => setModal({ type: 'editTrain', train })}
               labelMode={labelMode}
+              distanceUnit={distanceUnit}
               viewStart={viewStart}
               viewEnd={viewEnd}
               clockTime={clockTime}
               onPan={handlePan}
               externalHoveredId={hoveredCrewTrainId}
+              onScaleChange={(scale) => handleSettingsSave({ ...displayTimetable.settings, graph_scale: scale })}
             />
           )}
         </div>
@@ -886,6 +907,7 @@ export default function App() {
           paths={timetable.paths}
           crews={timetable.crews}
           existingColors={timetable.trains.map((t) => t.color)}
+          distanceUnit={distanceUnit}
           onDraftChange={setDraftTrain}
           onSave={handleSaveTrain}
           onDelete={modal.type === 'editTrain' ? () => handleDeleteTrain(modal.train.id) : undefined}

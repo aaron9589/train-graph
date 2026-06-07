@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS = {
   clock_enabled: false,
   clock_broker_url: '',
   clock_topic: 'trains/jmri/memory/currentTime',
+  auto_assign_min_break: 0,
+  graph_scale: null,
 };
 
 app.get('/api/timetables', (_req, res) => {
@@ -139,6 +141,7 @@ app.post('/api/timetables/import', (req, res) => {
       clock_enabled: Boolean(data.settings.clock_enabled),
       clock_broker_url: String(data.settings.clock_broker_url || ''),
       clock_topic: String(data.settings.clock_topic || DEFAULT_SETTINGS.clock_topic),
+      graph_scale: (data.settings.graph_scale != null && Number.isFinite(Number(data.settings.graph_scale))) ? Number(data.settings.graph_scale) : null,
     } : {}) },
     stations: (data.stations || []).map((s) => ({
       id: stationIdMap[s.id],
@@ -148,6 +151,7 @@ app.post('/api/timetables/import', (req, res) => {
       distance: (s.distance != null && s.distance !== '' && Number.isFinite(Number(s.distance))) ? Number(s.distance) : null,
       graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
       sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
+      branch_name: (s.branch_name && String(s.branch_name).trim()) ? String(s.branch_name).trim() : null,
     })),
     trains: (data.trains || []).map((tr) => {
       const trainId = uuidv4();
@@ -168,6 +172,7 @@ app.post('/api/timetables/import', (req, res) => {
           arrival: stop.arrival ? String(stop.arrival) : null,
           departure: stop.departure ? String(stop.departure) : null,
           special_instructions: stop.special_instructions ? String(stop.special_instructions) : null,
+          location_alias: stop.location_alias ? String(stop.location_alias) : null,
         })),
       };
     }),
@@ -258,6 +263,7 @@ app.post('/api/timetables/:id/restore', (req, res) => {
       distance: (s.distance != null && s.distance !== '' && Number.isFinite(Number(s.distance))) ? Number(s.distance) : null,
       graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
       sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
+      branch_name: (s.branch_name && String(s.branch_name).trim()) ? String(s.branch_name).trim() : null,
     }));
     if (Array.isArray(trains)) tt.trains = trains.map((tr) => ({
       id: String(tr.id),
@@ -276,6 +282,7 @@ app.post('/api/timetables/:id/restore', (req, res) => {
         arrival: s.arrival ? String(s.arrival) : null,
         departure: s.departure ? String(s.departure) : null,
         special_instructions: s.special_instructions ? String(s.special_instructions) : null,
+        location_alias: s.location_alias ? String(s.location_alias) : null,
       })),
     }));
     if (Array.isArray(paths)) tt.paths = paths.map((p) => ({
@@ -303,7 +310,7 @@ app.post('/api/timetables/:id/restore', (req, res) => {
 });
 
 app.put('/api/timetables/:id/settings', (req, res) => {
-  const { clock_enabled, clock_broker_url, clock_topic } = req.body;
+  const { clock_enabled, clock_broker_url, clock_topic, graph_scale, auto_assign_min_break } = req.body;
   if (clock_broker_url !== undefined) {
     // Only allow ws:// or wss:// broker URLs to prevent the client being
     // directed to connect to arbitrary non-MQTT endpoints.
@@ -318,23 +325,33 @@ app.put('/api/timetables/:id/settings', (req, res) => {
     if (clock_enabled !== undefined) tt.settings.clock_enabled = Boolean(clock_enabled);
     if (clock_broker_url !== undefined) tt.settings.clock_broker_url = String(clock_broker_url);
     if (clock_topic !== undefined) tt.settings.clock_topic = String(clock_topic);
+    if (graph_scale !== undefined) tt.settings.graph_scale = (graph_scale === null || !Number.isFinite(Number(graph_scale))) ? null : Number(graph_scale);
+    if (auto_assign_min_break !== undefined) tt.settings.auto_assign_min_break = Math.max(0, Number(auto_assign_min_break) || 0);
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
   res.json(normalise(updated));
 });
 
 app.post('/api/timetables/:id/stations', (req, res) => {
-  const { name, shortCode, distance, graphPos } = req.body;
+  const { name, shortCode, distance, graphPos, branchName, pushDown, aliasEnabled } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (graphPos == null || graphPos === '') return res.status(400).json({ error: 'graphPos is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
+    const newPos = Number(graphPos);
+    if (pushDown) {
+      tt.stations.forEach((s) => {
+        if ((s.graph_pos ?? 0) >= newPos) s.graph_pos = (s.graph_pos ?? 0) + 1;
+      });
+    }
     const maxOrder = tt.stations.reduce((m, s) => Math.max(m, s.sort_order || 0), -1);
     tt.stations.push({
       id: uuidv4(), timetable_id: req.params.id, name: name.trim(),
       short_code: shortCode || '',
       distance: (distance !== '' && distance != null) ? Number(distance) : null,
-      graph_pos: Number(graphPos),
+      graph_pos: newPos,
       sort_order: maxOrder + 1,
+      branch_name: (branchName && String(branchName).trim()) ? String(branchName).trim() : null,
+      alias_enabled: Boolean(aliasEnabled),
     });
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -342,15 +359,31 @@ app.post('/api/timetables/:id/stations', (req, res) => {
 });
 
 app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
-  const { name, shortCode, distance, graphPos, sortOrder } = req.body;
+  const { name, shortCode, distance, graphPos, sortOrder, branchName, pushDown, aliasEnabled } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
     const st = tt.stations.find((s) => s.id === req.params.stationId);
     if (st) {
       st.name = name.trim(); st.short_code = shortCode || '';
       st.distance = (distance !== '' && distance != null) ? Number(distance) : null;
-      if (graphPos != null && graphPos !== '') st.graph_pos = Number(graphPos);
+      if (graphPos != null && graphPos !== '') {
+        const newPos = Number(graphPos);
+        const oldPos = st.graph_pos ?? 0;
+        if (pushDown) {
+          const delta = newPos - oldPos;
+          if (delta !== 0) {
+            tt.stations.forEach((s) => {
+              if (s.id !== req.params.stationId && (s.graph_pos ?? 0) > oldPos) {
+                s.graph_pos = (s.graph_pos ?? 0) + delta;
+              }
+            });
+          }
+        }
+        st.graph_pos = newPos;
+      }
       st.sort_order = sortOrder != null ? sortOrder : st.sort_order;
+      st.branch_name = (branchName && String(branchName).trim()) ? String(branchName).trim() : null;
+      st.alias_enabled = Boolean(aliasEnabled);
     }
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -515,14 +548,66 @@ function buildPathStops(pathId, stops) {
   }));
 }
 
-function buildStops(trainId, stops) {
+/**
+ * Enforce terminal stop convention:
+ *   - first (origin) stop:      departure only  — arrival is stripped (or moved if that's all there is)
+ *   - last (destination) stop:  arrival only    — departure is stripped (or moved if that's all there is)
+ *
+ * Also removes any stops that ended up with both times null (e.g. from a
+ * previous buggy migration run).
+ */
+function stripTerminalTimes(stops) {
+  if (!stops || stops.length === 0) return stops;
+  function stopMins(s) {
+    const t = s.departure || s.arrival;
+    if (!t) return Infinity;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+  // Only consider stops that actually have a time when finding first/last
+  const timedStops = stops.filter((s) => s.arrival || s.departure);
+  if (timedStops.length === 0) return stops;
+  const sorted = [...timedStops].sort((a, b) => stopMins(a) - stopMins(b));
+  const firstId = sorted[0]?.id ?? sorted[0]?.station_id;
+  const lastId  = sorted[sorted.length - 1]?.id ?? sorted[sorted.length - 1]?.station_id;
+  if (firstId === lastId) return stops; // single-stop train — nothing to strip
   return stops
+    .map((s) => {
+      const key = s.id ?? s.station_id;
+      if (key === firstId) {
+        // Origin: departure only — unless the stop has a meaningful dwell (arrival ≠ departure).
+        if (s.arrival && s.departure && s.arrival !== s.departure) return s;
+        const dep = s.departure || s.arrival;
+        return { ...s, arrival: null, departure: dep };
+      }
+      if (key === lastId) {
+        // Destination: arrival only — unless the stop has a meaningful dwell (arrival ≠ departure).
+        if (s.arrival && s.departure && s.arrival !== s.departure) return s;
+        const arr = s.arrival || s.departure;
+        return { ...s, arrival: arr, departure: null };
+      }
+      return s;
+    })
+    .filter((s) => s.arrival || s.departure); // drop any null-null stops
+}
+
+function buildStops(trainId, stops) {
+  const built = stops
     .filter((s) => s.arrival || s.departure)
     .map((s) => ({
       id: uuidv4(), train_id: trainId, station_id: s.stationId,
       arrival: s.arrival || null, departure: s.departure || null,
       special_instructions: s.specialInstructions || null,
+      location_alias: s.locationAlias || null,
     }));
+  return stripTerminalTimes(built);
+}
+
+function normTime(t) {
+  if (!t || typeof t !== 'string') return t;
+  const parts = t.split(':');
+  if (parts.length < 2) return t;
+  return parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0');
 }
 
 function normalise(tt) {
@@ -536,16 +621,27 @@ function normalise(tt) {
         (a.graph_pos ?? a.distance ?? 0) - (b.graph_pos ?? b.distance ?? 0) ||
         a.sort_order - b.sort_order
     ),
+    trains: (tt.trains ?? []).map((tr) => ({
+      ...tr,
+      stops: stripTerminalTimes(
+        (tr.stops ?? []).map((s) => ({
+          ...s,
+          arrival: normTime(s.arrival),
+          departure: normTime(s.departure),
+        }))
+      ),
+    })),
   };
 }
 
 // ── Auto-assign trains to crews ───────────────────────────────
 
 app.post('/api/timetables/:id/trains/auto-assign', (req, res) => {
-  const { crewIds, trainIds, onlyUnassigned } = req.body;
+  const { crewIds, trainIds, onlyUnassigned, minBreakMins } = req.body;
   if (!Array.isArray(crewIds) || crewIds.length === 0) {
     return res.status(400).json({ error: 'crewIds must be a non-empty array' });
   }
+  const breakMins = Math.max(0, Number(minBreakMins) || 0);
 
   function trainMinutes(tr) {
     let start = Infinity, end = -Infinity;
@@ -564,6 +660,8 @@ app.post('/api/timetables/:id/trains/auto-assign', (req, res) => {
   const unassignedNames = [];
 
   const updated = mutateTimetable(req.params.id, (tt) => {
+    if (!tt.settings) tt.settings = { ...DEFAULT_SETTINGS };
+    tt.settings.auto_assign_min_break = breakMins;
     // Which trains to consider — filter by explicit trainIds list if provided, then by onlyUnassigned
     const trainIdSet = Array.isArray(trainIds) && trainIds.length > 0 ? new Set(trainIds) : null;
     const candidates = tt.trains.filter((t) => {
@@ -572,40 +670,62 @@ app.post('/api/timetables/:id/trains/auto-assign', (req, res) => {
       return true;
     });
 
-    // Sort by start time
-    const sorted = [...candidates].sort((a, b) => trainMinutes(a).start - trainMinutes(b).start);
-
-    // Track the latest end minute and job count per crew.
+    // Track all occupied intervals and job count per crew.
     // Pre-seed with any jobs those crews already hold (so existing assignments
     // act as hard constraints and aren't overlapped).
-    const crewEnds = {};
+    // Using intervals (not just max-end) means gaps between existing jobs are
+    // visible and new trains can fill them.
+    const crewIntervals = {};
     const crewCounts = {};
+    const crewLastEnd = {};
     const crewIdSet = new Set(crewIds);
-    crewIds.forEach((id) => { crewEnds[id] = -1; crewCounts[id] = 0; });
+    crewIds.forEach((id) => { crewIntervals[id] = []; crewCounts[id] = 0; crewLastEnd[id] = -1; });
     for (const tr of tt.trains) {
       if (!tr.crew_id || !crewIdSet.has(tr.crew_id)) continue;
-      const { end } = trainMinutes(tr);
-      if (end > crewEnds[tr.crew_id]) crewEnds[tr.crew_id] = end;
+      const { start, end } = trainMinutes(tr);
+      crewIntervals[tr.crew_id].push({ start, end });
+      if (end > crewLastEnd[tr.crew_id]) crewLastEnd[tr.crew_id] = end;
       crewCounts[tr.crew_id]++;
     }
 
+    // Returns true if [start, end] doesn't overlap any interval in the list,
+    // respecting the mandatory break gap between jobs.
+    function isFree(intervals, start, end) {
+      return intervals.every(({ start: s, end: e }) => end + breakMins <= s || start >= e + breakMins);
+    }
+
+    // Sort using MRV (minimum remaining values): process the most constrained
+    // trains first — those with the fewest crews available given pre-existing
+    // schedules. This prevents a train with many choices from accidentally
+    // consuming the only crew that a more constrained train could have used.
+    // Break ties by start time so the overall schedule stays chronological.
+    const sorted = [...candidates].sort((a, b) => {
+      const { start: sa, end: ea } = trainMinutes(a);
+      const { start: sb, end: eb } = trainMinutes(b);
+      const availA = crewIds.filter((id) => isFree(crewIntervals[id], sa, ea)).length;
+      const availB = crewIds.filter((id) => isFree(crewIntervals[id], sb, eb)).length;
+      if (availA !== availB) return availA - availB;
+      return sa - sb;
+    });
+
     for (const train of sorted) {
       const { start, end } = trainMinutes(train);
-      // Collect all crews who are free (no overlap with this train's start)
-      const available = crewIds.filter((id) => crewEnds[id] < start);
+      // Collect all crews who have no overlapping job
+      const available = crewIds.filter((id) => isFree(crewIntervals[id], start, end));
       if (!available.length) {
         unassignedNames.push(train.name);
         continue;
       }
-      // Pick the crew with the fewest jobs; break ties by who finished earliest
+      // Pick the crew with the fewest jobs; break ties by who finished most recently
       available.sort((a, b) =>
         crewCounts[a] !== crewCounts[b]
           ? crewCounts[a] - crewCounts[b]
-          : crewEnds[a] - crewEnds[b]
+          : crewLastEnd[a] - crewLastEnd[b]
       );
       const chosen = available[0];
       train.crew_id = chosen;
-      crewEnds[chosen] = end;
+      crewIntervals[chosen].push({ start, end });
+      if (end > crewLastEnd[chosen]) crewLastEnd[chosen] = end;
       crewCounts[chosen]++;
     }
   });
@@ -738,6 +858,7 @@ function deriveDirectionAtStation(train, stationId, stationOrderById) {
 function buildStationBoard(tt, stationNameParam, directionQuery, trainIdFilter, trainTypeFilter) {
   const sortedStations = sortStationsForDirection(tt.stations || []);
   const stationOrderById = new Map(sortedStations.map((s, idx) => [s.id, idx]));
+  const stationGraphPosById = new Map(sortedStations.map((s) => [s.id, Number(s.graph_pos ?? 0)]));
   const trainIdMatcher = makeLikeMatcher(trainIdFilter);
   const trainTypeMatcher = makeLikeMatcher(trainTypeFilter);
   const stationNameQuery = String(stationNameParam || '').trim().toLowerCase();
@@ -747,54 +868,131 @@ function buildStationBoard(tt, stationNameParam, directionQuery, trainIdFilter, 
   }
 
   const stationMap = new Map((sortedStations || []).map((s) => [s.id, s]));
-  const services = (tt.trains || [])
-    .map((tr) => {
-      const sequencedStops = getSequencedTimedStops(tr, stationOrderById);
-      const stationStopIndex = sequencedStops.findIndex((stop) => stop.station_id === station.id);
-      if (stationStopIndex === -1) return null;
-      const stationStop = sequencedStops[stationStopIndex];
-      const derivedDirection = deriveDirectionAtStation(tr, station.id, stationOrderById);
-      if (directionQuery && derivedDirection !== directionQuery) return null;
-      if (trainIdMatcher && !trainIdMatcher.test(String(tr.train_id || ''))) return null;
-      if (trainTypeMatcher && !trainTypeMatcher.test(String(tr.train_type || ''))) return null;
-      const stoppingPattern = sequencedStops.slice(stationStopIndex).map((stop) => {
-        const stopStation = stationMap.get(stop.station_id);
-        return {
-          stopName: stopStation ? stopStation.name : stop.station_id,
-          arrival: stop.arrival || null,
-          departure: stop.departure || null,
-          specialInstructions: stop.special_instructions || null,
-        };
-      });
-      const eventTime = stationStop.arrival || stationStop.departure || null;
+
+  // Trains that physically stop at this station (used to exclude from pass-through detection)
+  const stoppingTrainIds = new Set(
+    (tt.trains || [])
+      .filter((tr) => getSequencedTimedStops(tr, stationOrderById).some((s) => s.station_id === station.id))
+      .map((tr) => tr.id)
+  );
+
+  const allServices = [];
+
+  // Regular stopping services
+  for (const tr of (tt.trains || [])) {
+    const sequencedStops = getSequencedTimedStops(tr, stationOrderById);
+    const stationStopIndex = sequencedStops.findIndex((stop) => stop.station_id === station.id);
+    if (stationStopIndex === -1) continue;
+    const stationStop = sequencedStops[stationStopIndex];
+    const derivedDirection = deriveDirectionAtStation(tr, station.id, stationOrderById);
+    if (directionQuery && derivedDirection !== directionQuery) continue;
+    if (trainIdMatcher && !trainIdMatcher.test(String(tr.train_id || ''))) continue;
+    if (trainTypeMatcher && !trainTypeMatcher.test(String(tr.train_type || ''))) continue;
+    const stoppingPattern = sequencedStops.slice(stationStopIndex).map((stop) => {
+      const stopStation = stationMap.get(stop.station_id);
       return {
-        name: tr.name,
-        trainType: tr.train_type || '',
-        trainId: tr.train_id || '',
-        direction: derivedDirection || tr.direction || '',
-        notes: tr.notes || '',
-        nextCrewService: computeNextCrewService(tt, tr),
-        arrival: stationStop.arrival || null,
-        departure: stationStop.departure || null,
-        eventTime,
-        stoppingPattern,
-        _sortMinute: minuteForStop(stationStop),
+        stopName: stopStation ? stopStation.name : stop.station_id,
+        locationAlias: stop.location_alias || null,
+        arrival: stop.arrival || null,
+        departure: stop.departure || null,
+        specialInstructions: stop.special_instructions || null,
       };
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      const am = a._sortMinute == null ? Number.POSITIVE_INFINITY : a._sortMinute;
-      const bm = b._sortMinute == null ? Number.POSITIVE_INFINITY : b._sortMinute;
-      return am - bm || a.name.localeCompare(b.name);
-    })
-    .map(({ _sortMinute, ...service }) => service);
+    });
+    const eventTime = stationStop.arrival || stationStop.departure || null;
+    allServices.push({
+      name: tr.name,
+      trainType: tr.train_type || '',
+      trainId: tr.train_id || '',
+      direction: derivedDirection || tr.direction || '',
+      notes: tr.notes || '',
+      nextCrewService: computeNextCrewService(tt, tr),
+      arrival: stationStop.arrival || null,
+      departure: stationStop.departure || null,
+      eventTime,
+      stoppingPattern,
+      _sortMinute: minuteForStop(stationStop),
+    });
+  }
+
+  // Pass-through services: trains whose route crosses this station's graph_pos without stopping
+  const targetPos = stationGraphPosById.get(station.id);
+  if (targetPos != null) {
+    for (const tr of (tt.trains || [])) {
+      if (stoppingTrainIds.has(tr.id)) continue;
+      if (trainIdMatcher && !trainIdMatcher.test(String(tr.train_id || ''))) continue;
+      if (trainTypeMatcher && !trainTypeMatcher.test(String(tr.train_type || ''))) continue;
+
+      const sequencedStops = getSequencedTimedStops(tr, stationOrderById);
+      if (sequencedStops.length < 2) continue;
+
+      for (let i = 0; i < sequencedStops.length - 1; i++) {
+        const stopA = sequencedStops[i];
+        const stopB = sequencedStops[i + 1];
+        const posA = stationGraphPosById.get(stopA.station_id);
+        const posB = stationGraphPosById.get(stopB.station_id);
+        if (posA == null || posB == null) continue;
+
+        const minPos = Math.min(posA, posB);
+        const maxPos = Math.max(posA, posB);
+        if (targetPos <= minPos || targetPos >= maxPos) continue;
+
+        const derivedDirection = posA < posB ? 'down' : 'up';
+        if (directionQuery && derivedDirection !== directionQuery) continue;
+
+        // Interpolate estimated pass time between departure of A and arrival at B
+        const tAmin = minuteFromTime(stopA.departure || stopA.arrival);
+        const tBmin = minuteFromTime(stopB.arrival || stopB.departure);
+        let passTime = null;
+        let passMinute = null;
+        if (tAmin != null && tBmin != null && posA !== posB) {
+          const fraction = (targetPos - posA) / (posB - posA);
+          passMinute = Math.round(tAmin + fraction * (tBmin - tAmin));
+          passTime = formatClockMinute(passMinute);
+        }
+
+        const stoppingPattern = sequencedStops.slice(i + 1).map((stop) => {
+          const stopStation = stationMap.get(stop.station_id);
+          return {
+            stopName: stopStation ? stopStation.name : stop.station_id,
+            locationAlias: stop.location_alias || null,
+            arrival: stop.arrival || null,
+            departure: stop.departure || null,
+            specialInstructions: stop.special_instructions || null,
+          };
+        });
+
+        allServices.push({
+          name: tr.name,
+          trainType: tr.train_type || '',
+          trainId: tr.train_id || '',
+          direction: derivedDirection,
+          notes: tr.notes || '',
+          nextCrewService: computeNextCrewService(tt, tr),
+          arrival: null,
+          departure: null,
+          eventTime: passTime,
+          passTime,
+          passingThrough: true,
+          stoppingPattern,
+          _sortMinute: passMinute,
+        });
+        break; // one entry per train
+      }
+    }
+  }
 
   return {
     stationName: station.name,
     direction: directionQuery || 'all',
     trainIdFilter: trainIdFilter || null,
     trainTypeFilter: trainTypeFilter || null,
-    services,
+    services: allServices
+      .sort((a, b) => {
+        const am = a._sortMinute == null ? Number.POSITIVE_INFINITY : a._sortMinute;
+        const bm = b._sortMinute == null ? Number.POSITIVE_INFINITY : b._sortMinute;
+        return am - bm || a.name.localeCompare(b.name);
+      })
+      .map(({ _sortMinute, ...service }) => service),
   };
 }
 
@@ -836,6 +1034,7 @@ app.get('/api/timetables/:id/live/trains/:trainName', (req, res) => {
     const station = stationMap.get(stop.station_id);
     return {
       stopName: station ? station.name : stop.station_id,
+      locationAlias: stop.location_alias || null,
       arrival: stop.arrival || null,
       departure: stop.departure || null,
       specialInstructions: stop.special_instructions || null,
@@ -1176,6 +1375,32 @@ server.on('upgrade', (req, socket, head) => {
     wsServer.emit('connection', ws, req);
   });
 });
+
+// ── Startup migration: normalise terminal stop times ─────────────────────────
+// Runs once on every container start. Strips arrival from each train's first
+// stop and departure from its last stop across all timetables, so any data
+// created before this rule was enforced is brought into compliance.
+(function migrateTerminalTimes() {
+  const db = readDB();
+  let changed = 0;
+  for (const tt of db.timetables) {
+    for (const tr of (tt.trains ?? [])) {
+      const original = JSON.stringify(tr.stops);
+      tr.stops = stripTerminalTimes(
+        (tr.stops ?? []).map((s) => ({
+          ...s,
+          arrival: normTime(s.arrival),
+          departure: normTime(s.departure),
+        }))
+      );
+      if (JSON.stringify(tr.stops) !== original) changed++;
+    }
+  }
+  if (changed > 0) {
+    writeDB(db);
+    console.log(`Startup migration: normalised terminal stop times on ${changed} train(s).`);
+  }
+})();
 
 server.listen(PORT, () => {
   console.log('Train Graph server listening on http://localhost:' + PORT);

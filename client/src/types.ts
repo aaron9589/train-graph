@@ -21,6 +21,11 @@ export interface Station {
   /** Y-axis position on the graph (layout units, independent of real km). */
   graph_pos: number;
   sort_order: number;
+  /** Optional branch name. Stations sharing a branch_name are grouped and
+   *  shown indented on the graph with a collapse/expand toggle. */
+  branch_name: string | null;
+  /** When true, the per-train location alias field is shown in the train editor. */
+  alias_enabled?: boolean;
 }
 
 export interface TrainStop {
@@ -30,6 +35,7 @@ export interface TrainStop {
   arrival: string | null;
   departure: string | null;
   special_instructions?: string;
+  location_alias?: string | null;
 }
 
 export interface Crew {
@@ -56,6 +62,8 @@ export interface TimetableSettings {
   clock_enabled: boolean;
   clock_broker_url: string;
   clock_topic: string;
+  auto_assign_min_break: number;
+  graph_scale?: number | null;
 }
 
 export interface Timetable extends TimetableSummary {
@@ -92,6 +100,7 @@ export interface StopRequest {
   arrival: string | null;
   departure: string | null;
   specialInstructions?: string;
+  locationAlias?: string;
 }
 
 export interface TrainRequest {

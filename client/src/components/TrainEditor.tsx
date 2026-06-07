@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type InputHTMLAttributes } from 'react';
 import type { Station, Train, TrainStop, TrainRequest, Path, PathStop, Crew } from '../types';
 
 interface StopForm {
@@ -9,6 +9,7 @@ interface StopForm {
   departure: string;
   dwell: string; // minutes, used to compute departure and cascade
   specialInstructions: string;
+  locationAlias: string;
 }
 
 interface Props {
@@ -17,6 +18,7 @@ interface Props {
   paths: Path[];
   crews?: Crew[];
   existingColors?: string[];
+  distanceUnit?: 'km' | 'mi';
   onDraftChange: (draft: Train) => void;
   onSave: (data: TrainRequest) => void;
   onDelete?: () => void;
@@ -46,7 +48,7 @@ const PRESET_COLORS = [
   '#c084fc', // purple-400 (soft purple)
 ];
 
-export function TrainEditor({ train, stations, paths, crews = [], existingColors, onDraftChange, onSave, onDelete, onClose }: Props) {
+export function TrainEditor({ train, stations, paths, crews = [], existingColors, distanceUnit = 'km', onDraftChange, onSave, onDelete, onClose }: Props) {
   const sorted = [...stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
   // Keep original stops around so we can restore all-stations view if path is deselected
   const trainStopsRef = useRef(train?.stops);
@@ -80,6 +82,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
         arrival: s.arrival || null,
         departure: s.departure || null,
         special_instructions: s.specialInstructions || undefined,
+        location_alias: s.locationAlias || null,
       }));
 
     return {
@@ -167,6 +170,18 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
     );
   }
 
+  function handleStopBlur(idx: number) {
+    // If this is the first timed stop and arrival == departure, drop arrival (redundant at origin)
+    setStops((prev) => {
+      const s = prev[idx];
+      if (!s.arrival || !s.departure || s.arrival !== s.departure) return prev;
+      const timed = prev.filter((r) => r.arrival || r.departure);
+      const firstId = [...timed].sort((a, b) => stopMinutes(a) - stopMinutes(b))[0]?.stationId;
+      if (s.stationId !== firstId) return prev;
+      return prev.map((r, i) => i === idx ? { ...r, arrival: '' } : r);
+    });
+  }
+
   function handlePathChange(pathId: string) {
     const pid = pathId || null;
     setSelectedPathId(pid);
@@ -190,6 +205,7 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
           departure: existing?.departure ?? '',
           dwell: existing?.dwell ?? '',
           specialInstructions: existing?.specialInstructions ?? '',
+          locationAlias: existing?.locationAlias ?? '',
         };
       });
     setStops(newStops);
@@ -213,9 +229,14 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
         const ps = pathStops[i];
         if (!ps) break;
         const arrival = addMinutes(prevDep, ps.travel_time_from_prev);
-        const departure = addMinutes(arrival, ps.dwell_time);
-        next[i] = { ...next[i], arrival, departure };
-        prevDep = departure;
+        // Last stop is arrival-only — no departure or dwell
+        if (i === next.length - 1) {
+          next[i] = { ...next[i], arrival, departure: '', dwell: '' };
+        } else {
+          const departure = addMinutes(arrival, ps.dwell_time);
+          next[i] = { ...next[i], arrival, departure };
+          prevDep = departure;
+        }
       }
       return next;
     });
@@ -233,17 +254,59 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
     }
     setError('');
 
-    const saveStops = stops
-      .filter((s) => s.arrival || s.departure)
-      .map((s) => ({
+    const timedStops = stops.filter((s) => s.arrival || s.departure);
+    const sortedByTime = [...timedStops].sort((a, b) => stopMinutes(a) - stopMinutes(b));
+    const firstTimedId = sortedByTime[0]?.stationId;
+    const lastTimedId = sortedByTime[sortedByTime.length - 1]?.stationId;
+    const saveStops = timedStops.map((s) => {
+      // Stops with a true dwell (arrival and departure differ) keep both times
+      // even at terminal positions. Same arrival == departure is treated as terminal.
+      const hasDwell = !!(s.arrival && s.departure && s.arrival !== s.departure);
+      return {
         stationId: s.stationId,
-        arrival: s.arrival || null,
-        departure: s.departure || null,
+        arrival: (s.stationId === firstTimedId && !hasDwell) ? null : (s.arrival || null),
+        departure: (s.stationId === lastTimedId && !hasDwell) ? null : (s.departure || null),
         specialInstructions: s.specialInstructions || undefined,
-      }));
+        locationAlias: s.locationAlias || undefined,
+      };
+    });
 
     onSave({ id: train?.id, name: name.trim(), color, notes, trainType, trainId: trainIdField, direction, crewId: crewId || undefined, stops: saveStops });
   }
+
+  // Derived: which rows get the arrival-only / departure-only treatment.
+  // Use chronological time order (not graph_pos) so trains running in reverse
+  // direction (descending graph_pos) are handled correctly.
+  const timedStopsForOrder = stops.filter((s) => s.arrival || s.departure);
+  const [firstTimedId, lastTimedId] = (() => {
+    if (timedStopsForOrder.length < 2) return [null, null];
+    const sorted = [...timedStopsForOrder].sort((a, b) => stopMinutes(a) - stopMinutes(b));
+    return [sorted[0].stationId, sorted[sorted.length - 1].stationId];
+  })();
+
+  // Keep form state consistent with the terminal-stop rule: whenever the first
+  // or last timed stop changes, clear the disallowed field so there is no
+  // hidden stale value that could be saved.
+  // Exception: stops with a dwell (both arrival and departure) are preserved —
+  // the dwell is intentional and should not be stripped.
+  useEffect(() => {
+    if (!firstTimedId && !lastTimedId) return;
+    setStops((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (s.stationId === firstTimedId && s.arrival && (!s.departure || s.arrival === s.departure)) {
+          changed = true;
+          return { ...s, arrival: '' };
+        }
+        if (s.stationId === lastTimedId && (s.departure || s.dwell) && !s.arrival) {
+          changed = true;
+          return { ...s, departure: '', dwell: '' };
+        }
+        return s;
+      });
+      return changed ? next : prev;
+    });
+  }, [firstTimedId, lastTimedId]);
 
   return (
     <>
@@ -449,43 +512,70 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
                     {/* Times row */}
                     <div className="grid grid-cols-[1fr_100px_100px_58px] gap-0">
                     {/* Station cell */}
-                    <div className="px-3 py-2 flex flex-col justify-center">
+                    <div className="px-3 py-2 flex flex-col justify-center gap-0.5">
                       <span className="text-sm text-slate-300">{stop.stationName}</span>
-                      <span className="text-xs text-slate-600">{stop.distance != null ? `${stop.distance} km` : ''}</span>
+                      <span className="text-xs text-slate-600">{stop.distance != null ? `${stop.distance} ${distanceUnit ?? 'km'}` : ''}</span>
+                      {sorted.find((s) => s.id === stop.stationId)?.alias_enabled && (stop.arrival || stop.departure || stop.locationAlias) && (
+                        <input
+                          type="text"
+                          value={stop.locationAlias}
+                          onChange={(e) =>
+                            setStops((prev) =>
+                              prev.map((s, i) =>
+                                i === idx ? { ...s, locationAlias: e.target.value } : s
+                              )
+                            )
+                          }
+                          placeholder="Alias…"
+                          title="Location alias — overrides the station name in reports and tooltips for this train"
+                          className="bg-transparent text-xs text-sky-300 focus:outline-none focus:bg-slate-700/50 px-1 py-0.5 rounded border border-slate-700/50 focus:border-sky-500/50 placeholder:text-slate-700 w-full"
+                        />
+                      )}
                     </div>
 
-                    {/* Arrival */}
+                    {/* Arrival — hidden for first timed stop unless it has a dwell */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      <input
-                        type="time"
-                        value={stop.arrival}
-                        onChange={(e) => updateStop(idx, 'arrival', e.target.value)}
-                        onBlur={() => inferDeparture(idx)}
-                        className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
-                      />
+                      {stop.stationId === firstTimedId && !stop.departure ? (
+                        <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="First stop is departure only">—</span>
+                      ) : (
+                        <TimeInput
+                          value={stop.arrival}
+                          onChange={(v) => updateStop(idx, 'arrival', v)}
+                          onBlur={() => { inferDeparture(idx); handleStopBlur(idx); }}
+                          className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
+                        />
+                      )}
                     </div>
 
-                    {/* Departure */}
+                    {/* Departure — hidden for last timed stop unless it has a dwell */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      <input
-                        type="time"
-                        value={stop.departure}
-                        onChange={(e) => updateStop(idx, 'departure', e.target.value)}
-                        className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
-                      />
+                      {stop.stationId === lastTimedId && !stop.arrival ? (
+                        <span className="w-full text-center text-slate-600 text-sm px-1 py-1.5 select-none" title="Last stop is arrival only">—</span>
+                      ) : (
+                        <TimeInput
+                          value={stop.departure}
+                          onChange={(v) => updateStop(idx, 'departure', v)}
+                          onBlur={() => handleStopBlur(idx)}
+                          className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded"
+                        />
+                      )}
                     </div>
 
-                    {/* Dwell */}
+                    {/* Dwell — hidden for last stop unless it has a dwell (both times) */}
                     <div className="border-l border-slate-800 flex items-center px-1">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={stop.dwell}
-                        onChange={(e) => updateStop(idx, 'dwell', e.target.value)}
-                        placeholder="min"
-                        title="Dwell time in minutes"
-                        className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded text-center placeholder:text-slate-600"
-                      />
+                      {stop.stationId === lastTimedId && !stop.arrival ? (
+                        <span className="w-full" />
+                      ) : (
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={stop.dwell}
+                          onChange={(e) => updateStop(idx, 'dwell', e.target.value)}
+                          placeholder="min"
+                          title="Dwell time in minutes"
+                          className="w-full bg-transparent text-sm text-slate-200 focus:outline-none focus:bg-slate-700/50 px-1 py-1.5 rounded text-center placeholder:text-slate-600"
+                        />
+                      )}
                     </div>
                     </div>
 
@@ -572,6 +662,13 @@ export function TrainEditor({ train, stations, paths, crews = [], existingColors
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function stopMinutes(s: StopForm): number {
+  const t = s.departure || s.arrival;
+  if (!t) return Infinity;
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
 function buildStopForms(stations: Station[], existingStops?: TrainStop[]): StopForm[] {
   const stopMap = new Map(existingStops?.map((s) => [s.station_id, s]) ?? []);
   return stations.map((s) => {
@@ -584,6 +681,7 @@ function buildStopForms(stations: Station[], existingStops?: TrainStop[]): StopF
       departure: existing?.departure ?? '',
       dwell: '',
       specialInstructions: existing?.special_instructions ?? '',
+      locationAlias: existing?.location_alias ?? '',
     };
   });
 }
@@ -657,6 +755,31 @@ function detectDirection(stops: StopForm[]): 'down' | 'up' {
     .filter((s) => s.min >= 0);
   if (timed.length < 2) return 'down';
   return timed[0].min <= timed[timed.length - 1].min ? 'down' : 'up';
+}
+
+// Safari renders a default time (e.g. 12:30 PM) for <input type="time" value="">
+// instead of the blank --:-- -- placeholder that other browsers show.
+// Fix: render as type="text" when empty and not focused; switch to type="time" on focus.
+function TimeInput({ value, onChange, onBlur, className, ...rest }: {
+  value: string;
+  onChange: (v: string) => void;
+  onBlur?: () => void;
+  className?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur' | 'type'>) {
+  const [focused, setFocused] = useState(false);
+  const asTime = value !== '' || focused;
+  return (
+    <input
+      {...rest}
+      type={asTime ? 'time' : 'text'}
+      value={value}
+      placeholder={asTime ? undefined : '--:-- --'}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => { setFocused(false); onBlur?.(); }}
+      className={className}
+    />
+  );
 }
 
 function diffMinutes(from: string, to: string): number {

@@ -5,6 +5,8 @@ import type { ClockStatus } from '../hooks/useFastClock';
 interface Props {
   labelMode: 'code' | 'name';
   onLabelModeChange: (m: 'code' | 'name') => void;
+  distanceUnit: 'km' | 'mi';
+  onDistanceUnitChange: (u: 'km' | 'mi') => void;
   settings: TimetableSettings;
   onSettingsSave: (s: TimetableSettings) => Promise<void>;
   clockStatus: ClockStatus;
@@ -18,14 +20,28 @@ const APP_BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '');
 const API_BASE = APP_BASE + '/api';
 
 export function SettingsPanel({
-  labelMode, onLabelModeChange, settings, onSettingsSave, clockStatus, clockError, onClose,
+  labelMode, onLabelModeChange, distanceUnit, onDistanceUnitChange,
+  settings, onSettingsSave, clockStatus, clockError, onClose,
   timetableId, firstStationName,
 }: Props) {
   const [local, setLocal] = useState<TimetableSettings>(settings);
   const [saving, setSaving] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Tracks the last settings value we synced from the server. Used to detect
+  // user edits: if local diverges from this snapshot the user has pending changes.
+  const settingsSnapshotRef = useRef(settings);
 
-  useEffect(() => setLocal(settings), [settings]);
+  useEffect(() => {
+    setLocal((prev) => {
+      const snap = settingsSnapshotRef.current;
+      settingsSnapshotRef.current = settings;
+      // No user edits since last sync → full re-sync (e.g. timetable switch).
+      if (JSON.stringify(prev) === JSON.stringify(snap)) return settings;
+      // User has pending edits → only pull in fields not shown in this form
+      // so a background graph-scale change doesn't wipe the clock config.
+      return { ...prev, graph_scale: settings.graph_scale, auto_assign_min_break: settings.auto_assign_min_break };
+    });
+  }, [settings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
@@ -83,6 +99,21 @@ export function SettingsPanel({
               labelMode === 'name' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
             }`}
           >Name</button>
+        </div>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-3 mb-2">Distance unit</p>
+        <div className="flex rounded-lg overflow-hidden border border-slate-700">
+          <button
+            onClick={() => onDistanceUnitChange('km')}
+            className={`flex-1 py-1 text-xs font-mono transition-colors ${
+              distanceUnit === 'km' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >km</button>
+          <button
+            onClick={() => onDistanceUnitChange('mi')}
+            className={`flex-1 py-1 text-xs font-mono transition-colors ${
+              distanceUnit === 'mi' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >mi</button>
         </div>
       </div>
 

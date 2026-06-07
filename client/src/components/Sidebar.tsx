@@ -15,8 +15,8 @@ interface Props {
   onDeleteTimetable: (id: string) => void;
   onDuplicateTimetable: (id: string) => void;
   onSetActiveTimetable: (id: string | null) => void;
-  onAddStation: (data: { name: string; shortCode: string; distance: number | null; graphPos: number }) => void;
-  onUpdateStation: (id: string, data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }) => void;
+  onAddStation: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }) => void;
+  onUpdateStation: (id: string, data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }) => void;
   onDeleteStation: (id: string) => void;
   onNewPath: () => void;
   onEditPath: (path: Path) => void;
@@ -33,9 +33,10 @@ interface Props {
   onUpdateCrew: (crewId: string, data: { name: string; color: string }) => void;
   onDeleteCrew: (crewId: string) => void;
   onReorderCrews: (order: string[]) => void;
-  onAutoAssignCrews: (data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean }) => Promise<string[]>;
+  onAutoAssignCrews: (data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean; minBreakMins: number }) => Promise<string[]>;
   onUnassignTrain: (trainId: string) => void;
   onCrewTrainHover?: (trainId: string | null) => void;
+  distanceUnit?: 'km' | 'mi';
 }
 
 export function Sidebar({
@@ -71,8 +72,10 @@ export function Sidebar({
   onAutoAssignCrews,
   onUnassignTrain,
   onCrewTrainHover,
+  distanceUnit,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [trainSearch, setTrainSearch] = useState('');
   const [openSections, setOpenSections] = useLocalStorage('tg:openSections', { trains: true, stations: true, paths: false, crews: false });
   const [editingCrew, setEditingCrew] = useState<{ id: string; name: string; color: string } | null>(null);
   const [newCrew, setNewCrew] = useState<{ name: string; color: string } | null>(null);
@@ -81,6 +84,7 @@ export function Sidebar({
   const [autoAssignCrewIds, setAutoAssignCrewIds] = useState<Set<string>>(new Set());
   const [autoAssignTrainIds, setAutoAssignTrainIds] = useState<Set<string>>(new Set());
   const [autoAssignOnlyUnassigned, setAutoAssignOnlyUnassigned] = useState(true);
+  const [autoAssignMinBreak, setAutoAssignMinBreak] = useState(0);
   const [autoAssignWarning, setAutoAssignWarning] = useState<string[] | null>(null);
   const dragCrewId = useRef<string | null>(null);
   const dragOverCrewId = useRef<string | null>(null);
@@ -109,7 +113,9 @@ export function Sidebar({
       {/* Header */}
       <div className="px-4 pt-5 pb-3 shrink-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-2xl">🚂</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="#6366f1" viewBox="0 0 16 16" className="shrink-0">
+            <path d="M10.621.515C8.647.02 7.353.02 5.38.515c-.924.23-1.982.766-2.78 1.22C1.566 2.322 1 3.432 1 4.582V13.5A2.5 2.5 0 0 0 3.5 16h9a2.5 2.5 0 0 0 2.5-2.5V4.583c0-1.15-.565-2.26-1.6-2.849-.797-.453-1.855-.988-2.779-1.22ZM6.5 2h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1 0-1m-2 2h7A1.5 1.5 0 0 1 13 5.5v2A1.5 1.5 0 0 1 11.5 9h-7A1.5 1.5 0 0 1 3 7.5v-2A1.5 1.5 0 0 1 4.5 4m.5 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0m0 0a1 1 0 1 1 2 0 1 1 0 0 1-2 0m8 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0m-3-1a1 1 0 1 1 0 2 1 1 0 0 1 0-2M4 5.5a.5.5 0 0 1 .5-.5h3v3h-3a.5.5 0 0 1-.5-.5zM8.5 8V5h3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5z"/>
+          </svg>
           <span className="font-bold text-white tracking-tight text-lg flex-1">LiveRun</span>
           <button
             onClick={onToggleCollapse}
@@ -119,7 +125,7 @@ export function Sidebar({
             <ChevronLeftIcon />
           </button>
         </div>
-        <p className="text-xs text-slate-500 mb-3 pl-9">Operating Session Resource Planner</p>
+        <p className="text-xs text-slate-500 mb-3 pl-9">Operating Session Resource Planner <span className="text-slate-600">v{__APP_VERSION__}</span></p>
 
         {/* Timetable section */}
         <div className="flex items-center justify-between mb-2">
@@ -260,11 +266,24 @@ export function Sidebar({
             <p className="text-xs text-slate-600 mb-2">Add and manage trains on the graph. Dots indicate: <span className="text-blue-400">●</span> notes &nbsp;<span className="text-amber-400">●</span> special instructions &nbsp;<span className="text-green-400">●</span> crew assigned.</p>
             {openSections.trains && (
               <>
+                {timetable.trains.length > 0 && (
+                  <input
+                    type="text"
+                    value={trainSearch}
+                    onChange={(e) => setTrainSearch(e.target.value)}
+                    placeholder="Filter trains…"
+                    className="w-full mb-2 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-slate-500"
+                  />
+                )}
                 {timetable.trains.length === 0 && (
                   <p className="text-xs text-slate-600 py-1">No trains yet</p>
                 )}
                 <div className="space-y-1">
-                  {sortTrains(timetable.trains).map((train) => {
+                  {sortTrains(timetable.trains).filter((train) =>
+                    !trainSearch.trim() ||
+                    train.name.toLowerCase().includes(trainSearch.toLowerCase()) ||
+                    (train.train_id ?? '').toLowerCase().includes(trainSearch.toLowerCase())
+                  ).map((train) => {
                     const hidden = hiddenTrainIds.has(train.id);
                     const hasNotes = !!train.notes;
                     const hasSpecialInstructions = train.stops.some((s) => !!s.special_instructions);
@@ -355,6 +374,7 @@ export function Sidebar({
                       setAutoAssignOpen((v) => !v);
                       setAutoAssignCrewIds(new Set(timetable.crews.map((c) => c.id)));
                       setAutoAssignTrainIds(new Set(timetable.trains.filter((t) => !t.crew_id).map((t) => t.id)));
+                      setAutoAssignMinBreak(timetable.settings.auto_assign_min_break ?? 0);
                     }}
                     className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
                     title="Auto-assign trains to crews"
@@ -431,20 +451,36 @@ export function Sidebar({
                     </label>
                   ))}
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-violet-700/30">
-                  <input
-                    type="checkbox"
-                    checked={autoAssignOnlyUnassigned}
-                    onChange={(e) => setAutoAssignOnlyUnassigned(e.target.checked)}
-                    className="accent-violet-500 w-3.5 h-3.5 shrink-0"
-                  />
-                  <span className="text-xs text-slate-400">Only unassigned trains</span>
-                </label>
+                <div className="pt-1 border-t border-violet-700/30 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoAssignOnlyUnassigned}
+                      onChange={(e) => setAutoAssignOnlyUnassigned(e.target.checked)}
+                      className="accent-violet-500 w-3.5 h-3.5 shrink-0"
+                    />
+                    <span className="text-xs text-slate-400">Only unassigned trains</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 flex-1">Min. break between jobs</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        max={120}
+                        value={autoAssignMinBreak}
+                        onChange={(e) => setAutoAssignMinBreak(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-14 rounded bg-slate-800 border border-slate-600 px-2 py-0.5 text-xs text-white text-right focus:outline-none focus:border-violet-500"
+                      />
+                      <span className="text-xs text-slate-500">min</span>
+                    </div>
+                  </div>
+                </div>
                 <div className="flex gap-2 pt-1">
                   <button
                     onClick={() => {
                       if (autoAssignCrewIds.size === 0 || autoAssignTrainIds.size === 0) return;
-                      onAutoAssignCrews({ crewIds: [...autoAssignCrewIds], trainIds: [...autoAssignTrainIds], onlyUnassigned: autoAssignOnlyUnassigned })
+                      onAutoAssignCrews({ crewIds: [...autoAssignCrewIds], trainIds: [...autoAssignTrainIds], onlyUnassigned: autoAssignOnlyUnassigned, minBreakMins: autoAssignMinBreak })
                         .then((unassigned) => {
                           setAutoAssignOpen(false);
                           if (unassigned.length > 0) setAutoAssignWarning(unassigned);
@@ -680,6 +716,7 @@ export function Sidebar({
             stations={timetable.stations}
             open={openSections.stations}
             onToggle={() => toggleSection('stations')}
+            distanceUnit={distanceUnit}
             onAdd={onAddStation}
             onUpdate={onUpdateStation}
             onDelete={onDeleteStation}

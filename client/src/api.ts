@@ -89,7 +89,7 @@ export const api = {
 
   addStation: (
     timetableId: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }
   ) =>
     req<Timetable>(`/timetables/${timetableId}/stations`, {
       method: 'POST',
@@ -99,7 +99,7 @@ export const api = {
   updateStation: (
     timetableId: string,
     stationId: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }
   ) =>
     req<Timetable>(`/timetables/${timetableId}/stations/${stationId}`, {
       method: 'PUT',
@@ -174,7 +174,7 @@ export const api = {
       body: JSON.stringify({ order }),
     }),
 
-  autoAssignCrews: (timetableId: string, data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean }) =>
+  autoAssignCrews: (timetableId: string, data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean; minBreakMins: number }) =>
     req<Timetable & { unassigned?: string[] }>(`/timetables/${timetableId}/trains/auto-assign`, {
       method: 'POST',
       body: JSON.stringify(data),

@@ -5,10 +5,11 @@ interface Props {
   stations: Station[];
   open?: boolean;
   onToggle?: () => void;
-  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number }) => void;
+  distanceUnit?: 'km' | 'mi';
+  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName: string | null; pushDown: boolean; aliasEnabled: boolean }) => void;
   onUpdate: (
     id: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName: string | null; pushDown: boolean; aliasEnabled: boolean }
   ) => void;
   onDelete: (id: string) => void;
 }
@@ -18,14 +19,17 @@ interface StationFormData {
   shortCode: string;
   distance: string;   // optional km display label
   graphPos: string;   // required Y-axis position
+  branchName: string; // optional branch group name
+  aliasEnabled: boolean;
 }
 
-const EMPTY: StationFormData = { name: '', shortCode: '', distance: '', graphPos: '' };
+const EMPTY: StationFormData = { name: '', shortCode: '', distance: '', graphPos: '', branchName: '', aliasEnabled: false };
 
-export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDelete }: Props) {
+export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', onAdd, onUpdate, onDelete }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addForm, setAddForm] = useState<StationFormData | null>(null);
   const [editForm, setEditForm] = useState<StationFormData>(EMPTY);
+  const [pushDown, setPushDown] = useState(false);
   const [error, setError] = useState('');
 
   const sorted = [...stations].sort((a, b) => (a.graph_pos ?? 0) - (b.graph_pos ?? 0));
@@ -44,6 +48,8 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
       shortCode: s.short_code,
       distance: s.distance != null ? String(s.distance) : '',
       graphPos: String(s.graph_pos ?? 0),
+      branchName: s.branch_name ?? '',
+      aliasEnabled: s.alias_enabled ?? false,
     });
     setAddForm(null);
     setError('');
@@ -52,6 +58,7 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
   function cancelAll() {
     setEditingId(null);
     setAddForm(null);
+    setPushDown(false);
     setError('');
   }
 
@@ -71,6 +78,9 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
       shortCode: addForm.shortCode.trim(),
       distance: addForm.distance !== '' ? Number(addForm.distance) : null,
       graphPos: Number(addForm.graphPos),
+      branchName: addForm.branchName.trim() || null,
+      pushDown,
+      aliasEnabled: addForm.aliasEnabled,
     });
     setAddForm(null);
     setError('');
@@ -85,6 +95,9 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
       distance: editForm.distance !== '' ? Number(editForm.distance) : null,
       graphPos: Number(editForm.graphPos),
       sortOrder: s.sort_order,
+      branchName: editForm.branchName.trim() || null,
+      pushDown,
+      aliasEnabled: editForm.aliasEnabled,
     });
     setEditingId(null);
     setError('');
@@ -165,6 +178,31 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
                 title="Km label (display only, optional)"
                 className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
               />
+              <input
+                value={editForm.branchName}
+                onChange={(e) => setEditForm({ ...editForm, branchName: e.target.value })}
+                placeholder="Branch name (optional)"
+                title="Branch group — stations sharing this name are shown indented together on the graph"
+                className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+              />
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={editForm.aliasEnabled}
+                  onChange={(e) => setEditForm({ ...editForm, aliasEnabled: e.target.checked })}
+                  className="accent-sky-500"
+                />
+                Allow per-train location alias
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={pushDown}
+                  onChange={(e) => setPushDown(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                Shift stations below by position delta
+              </label>
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={cancelAll}
@@ -197,7 +235,7 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
                 <span className="text-sm text-slate-300 truncate block">{s.name}</span>
                 <span className="text-xs text-slate-600">
                   {s.short_code ? `${s.short_code} · ` : ''}pos {s.graph_pos ?? 0}
-                  {s.distance != null ? ` · ${s.distance} km` : ''}
+                  {s.distance != null ? ` · ${s.distance} ${distanceUnit ?? 'km'}` : ''}{s.branch_name ? ` · ${s.branch_name}` : ''}{s.alias_enabled ? ' · alias ✓' : ''}
                 </span>
               </div>
               <button
@@ -251,6 +289,31 @@ export function StationPanel({ stations, open, onToggle, onAdd, onUpdate, onDele
               title="Km label (display only, optional)"
               className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
             />
+            <input
+              value={addForm.branchName}
+              onChange={(e) => setAddForm({ ...addForm, branchName: e.target.value })}
+              placeholder="Branch name (optional)"
+              title="Branch group — stations sharing this name are shown indented together on the graph"
+              className="w-full rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+            />
+            <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={addForm.aliasEnabled}
+                onChange={(e) => setAddForm({ ...addForm, aliasEnabled: e.target.checked })}
+                className="accent-sky-500"
+              />
+              Allow per-train location alias
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={pushDown}
+                onChange={(e) => setPushDown(e.target.checked)}
+                className="accent-blue-500"
+              />
+              Shift stations below by position delta
+            </label>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={cancelAll}
