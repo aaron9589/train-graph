@@ -10,7 +10,7 @@ services:
       - liverun-data:/app/server/data
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=38001
       # Set BASE_PATH if serving under a sub-path e.g. /liverun
       # Leave unset (or empty) for root / subdomain deployments
       # - BASE_PATH=/liverun
