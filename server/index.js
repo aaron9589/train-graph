@@ -43,6 +43,7 @@ const DEFAULT_SETTINGS = {
   clock_broker_url: '',
   clock_topic: 'trains/jmri/memory/currentTime',
   auto_assign_min_break: 0,
+  graph_scale: null,
 };
 
 app.get('/api/timetables', (_req, res) => {
@@ -140,6 +141,7 @@ app.post('/api/timetables/import', (req, res) => {
       clock_enabled: Boolean(data.settings.clock_enabled),
       clock_broker_url: String(data.settings.clock_broker_url || ''),
       clock_topic: String(data.settings.clock_topic || DEFAULT_SETTINGS.clock_topic),
+      graph_scale: (data.settings.graph_scale != null && Number.isFinite(Number(data.settings.graph_scale))) ? Number(data.settings.graph_scale) : null,
     } : {}) },
     stations: (data.stations || []).map((s) => ({
       id: stationIdMap[s.id],
@@ -308,7 +310,7 @@ app.post('/api/timetables/:id/restore', (req, res) => {
 });
 
 app.put('/api/timetables/:id/settings', (req, res) => {
-  const { clock_enabled, clock_broker_url, clock_topic } = req.body;
+  const { clock_enabled, clock_broker_url, clock_topic, graph_scale, auto_assign_min_break } = req.body;
   if (clock_broker_url !== undefined) {
     // Only allow ws:// or wss:// broker URLs to prevent the client being
     // directed to connect to arbitrary non-MQTT endpoints.
@@ -323,6 +325,8 @@ app.put('/api/timetables/:id/settings', (req, res) => {
     if (clock_enabled !== undefined) tt.settings.clock_enabled = Boolean(clock_enabled);
     if (clock_broker_url !== undefined) tt.settings.clock_broker_url = String(clock_broker_url);
     if (clock_topic !== undefined) tt.settings.clock_topic = String(clock_topic);
+    if (graph_scale !== undefined) tt.settings.graph_scale = (graph_scale === null || !Number.isFinite(Number(graph_scale))) ? null : Number(graph_scale);
+    if (auto_assign_min_break !== undefined) tt.settings.auto_assign_min_break = Math.max(0, Number(auto_assign_min_break) || 0);
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
   res.json(normalise(updated));
@@ -656,6 +660,8 @@ app.post('/api/timetables/:id/trains/auto-assign', (req, res) => {
   const unassignedNames = [];
 
   const updated = mutateTimetable(req.params.id, (tt) => {
+    if (!tt.settings) tt.settings = { ...DEFAULT_SETTINGS };
+    tt.settings.auto_assign_min_break = breakMins;
     // Which trains to consider — filter by explicit trainIds list if provided, then by onlyUnassigned
     const trainIdSet = Array.isArray(trainIds) && trainIds.length > 0 ? new Set(trainIds) : null;
     const candidates = tt.trains.filter((t) => {

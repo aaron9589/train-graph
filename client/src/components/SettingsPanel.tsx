@@ -27,8 +27,21 @@ export function SettingsPanel({
   const [local, setLocal] = useState<TimetableSettings>(settings);
   const [saving, setSaving] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Tracks the last settings value we synced from the server. Used to detect
+  // user edits: if local diverges from this snapshot the user has pending changes.
+  const settingsSnapshotRef = useRef(settings);
 
-  useEffect(() => setLocal(settings), [settings]);
+  useEffect(() => {
+    setLocal((prev) => {
+      const snap = settingsSnapshotRef.current;
+      settingsSnapshotRef.current = settings;
+      // No user edits since last sync → full re-sync (e.g. timetable switch).
+      if (JSON.stringify(prev) === JSON.stringify(snap)) return settings;
+      // User has pending edits → only pull in fields not shown in this form
+      // so a background graph-scale change doesn't wipe the clock config.
+      return { ...prev, graph_scale: settings.graph_scale, auto_assign_min_break: settings.auto_assign_min_break };
+    });
+  }, [settings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     function onDown(e: MouseEvent) {

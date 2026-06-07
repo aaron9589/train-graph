@@ -11,6 +11,8 @@ const MAJOR_TICK = 60; // minutes
 // below this threshold — so simple/sparse timetables always fill the viewport.
 // Labels are always shown regardless of proximity (server ensures ≥1.0 unit gaps).
 const MIN_STATION_GAP_PX = 18;
+// Maximum vertical zoom expressed as a multiple of the fit-to-window scale
+const MAX_V_ZOOM_FACTOR = 20;
 
 // Colour palette for branch groups (cycles if more than 8 branches)
 const BRANCH_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
@@ -194,12 +196,13 @@ interface Props {
   clockTime?: number | null;
   onPan?: (newViewStart: number) => void;
   externalHoveredId?: string | null;
+  onScaleChange?: (scale: number | null) => void;
 }
 
 export function TrainGraph({
   timetable, onTrainClick, labelMode = 'code', distanceUnit = 'km',
   viewStart: viewStartProp, viewEnd: viewEndProp,
-  clockTime, onPan, externalHoveredId,
+  clockTime, onPan, externalHoveredId, onScaleChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -208,9 +211,15 @@ export function TrainGraph({
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [userScale, setUserScale] = useState<number | null>(timetable.settings.graph_scale ?? null);
   // Ref to stable layout values used in external-hover effect (avoids stale closures)
   const layoutRef = useRef({ stationMap: new Map<string, { graph_pos: number; name: string }>(), viewStart: 0, viewEnd: 0, posToY: (_: number) => PAD.top, gw: 0, timetable });
   const needsVScrollRef = useRef(false);
+  // Refs for stable values accessible inside non-reactive wheel handler
+  const scaleRef = useRef<{ pxPerUnit: number; minPxPerUnit: number; fitPxPerUnit: number }>({ pxPerUnit: 1, minPxPerUnit: 1, fitPxPerUnit: 1 });
+  const onScaleChangeRef = useRef(onScaleChange);
+  onScaleChangeRef.current = onScaleChange;
+  const scaleDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Responsive sizing
   useEffect(() => {
@@ -223,6 +232,12 @@ export function TrainGraph({
     return () => ro.disconnect();
   }, []);
 
+  // Reset stored scale when switching timetables
+  useEffect(() => {
+    clearTimeout(scaleDebounceRef.current);
+    setUserScale(timetable.settings.graph_scale ?? null);
+  }, [timetable.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const ttStart = timeToMinutes(timetable.start_time);
   const ttEnd = timeToMinutes(timetable.end_time);
   const viewStart = viewStartProp ?? ttStart;
@@ -231,12 +246,25 @@ export function TrainGraph({
   const ttRange = ttEnd - ttStart;
   const isZoomed = viewWidth < ttRange;
 
-  // Non-passive wheel for pan
+  // Non-passive wheel for pan + Ctrl+scroll vertical scale
   useEffect(() => {
     const el = svgRef.current;
-    if (!el || !onPan) return;
+    if (!el) return;
     const gw = size.w - PAD.left - PAD.right;
     const handler = (e: WheelEvent) => {
+      // Ctrl+scroll → adjust vertical scale (only when onScaleChange is wired up)
+      if (e.ctrlKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        if (!onScaleChangeRef.current) return;
+        e.preventDefault();
+        const { pxPerUnit: cur, minPxPerUnit: minPx, fitPxPerUnit: fitPx } = scaleRef.current;
+        const factor = e.deltaY > 0 ? 0.92 : 1.08;
+        const next = Math.min(fitPx * MAX_V_ZOOM_FACTOR, Math.max(minPx, Math.round(cur * factor * 100) / 100));
+        setUserScale(next);
+        clearTimeout(scaleDebounceRef.current);
+        scaleDebounceRef.current = setTimeout(() => onScaleChangeRef.current?.(next), 600);
+        return;
+      }
+      if (!onPan) return;
       // When the graph is taller than the viewport, let the browser handle vertical scroll natively
       if (needsVScrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) return;
       e.preventDefault();
@@ -267,10 +295,8 @@ export function TrainGraph({
   // Flat station map used by train-line renderer
   const stationMap = new Map(stations.map((s) => [s.id, { graph_pos: s.graph_pos ?? 0, name: s.name }]));
 
-  // Scale to fill the container. Only grow taller (and scroll) when the tightest
-  // gap between stations would otherwise be too small to read.
-  // Exclude cross-branch-boundary gaps (e.g. main→branch junction) from this
-  // calculation — those are intentionally close and must not inflate the scale.
+  // Exclude cross-branch-boundary gaps (e.g. main→branch junction) from the
+  // minimum-gap calculation — those are intentionally close.
   const stationGaps = stations.length > 1
     ? stations.slice(1).map((s, i) => {
         const prev = stations[i];
@@ -279,9 +305,16 @@ export function TrainGraph({
       }).filter((g): g is number => g !== null && g > 0)
     : [];
   const minGap = stationGaps.length > 0 ? Math.min(...stationGaps) : (maxPos || 1);
-  const pxPerUnit = maxPos > 0 ? Math.max(gh_container / maxPos, MIN_STATION_GAP_PX / minGap) : gh_container;
+  // Floor: never let any same-branch station pair render closer than MIN_STATION_GAP_PX.
+  const minPxPerUnit = minGap > 0 ? MIN_STATION_GAP_PX / minGap : 1;
+  // Fit scale fills the container exactly (clamped to the station-gap floor).
+  const fitPxPerUnit = maxPos > 0 ? Math.max(gh_container / maxPos, minPxPerUnit) : gh_container;
+  // User-stored scale wins if set; otherwise auto-fit.
+  const pxPerUnit = userScale !== null ? Math.max(userScale, minPxPerUnit) : fitPxPerUnit;
   const gh = pxPerUnit * maxPos;
   const needsVScroll = gh > gh_container + 1;
+  // Keep ref current for wheel handler
+  scaleRef.current = { pxPerUnit, minPxPerUnit, fitPxPerUnit };
   const svgTotalH = needsVScroll ? Math.ceil(gh + PAD.top + PAD.bottom) : size.h - scrollbarH;
   needsVScrollRef.current = needsVScroll;
 
@@ -301,6 +334,24 @@ export function TrainGraph({
   const distToY = (pos: number) => PAD.top + (maxPos > 0 ? (pos / maxPos) * gh : 0);
 
   const handleMouseLeave = () => { setTooltip(null); setHoveredId(null); };
+
+  const handleVZoomIn = () => {
+    const next = Math.min(fitPxPerUnit * MAX_V_ZOOM_FACTOR, Math.round(pxPerUnit * 1.25 * 100) / 100);
+    setUserScale(next);
+    clearTimeout(scaleDebounceRef.current);
+    scaleDebounceRef.current = setTimeout(() => onScaleChangeRef.current?.(next), 600);
+  };
+  const handleVZoomOut = () => {
+    const next = Math.max(minPxPerUnit, Math.round(pxPerUnit * 0.8 * 100) / 100);
+    setUserScale(next);
+    clearTimeout(scaleDebounceRef.current);
+    scaleDebounceRef.current = setTimeout(() => onScaleChangeRef.current?.(next), 600);
+  };
+  const handleVZoomFit = () => {
+    clearTimeout(scaleDebounceRef.current);
+    setUserScale(null);
+    scaleDebounceRef.current = setTimeout(() => onScaleChangeRef.current?.(null), 600);
+  };
 
   // Highlight from external source (e.g. Sidebar crew panel hover)
   useEffect(() => {
@@ -402,7 +453,26 @@ export function TrainGraph({
   const clockInView = clockTime != null && clockTime >= viewStart && clockTime <= viewEnd;
 
   return (
-    <div ref={containerRef} className="w-full h-full flex flex-col select-none overflow-hidden">
+    <div ref={containerRef} className="w-full h-full relative flex flex-col select-none overflow-hidden">
+      {/* Vertical scale controls */}
+      <div className="absolute z-10 flex items-center gap-0.5 bg-slate-900/80 backdrop-blur-sm rounded border border-slate-700/50 overflow-hidden" style={{ top: PAD.top + 4, right: PAD.right + 4 }}>
+        <button
+          onClick={handleVZoomOut}
+          disabled={pxPerUnit <= minPxPerUnit + 0.01}
+          title="Zoom out (vertical) — Ctrl+scroll"
+          className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 disabled:opacity-30 disabled:cursor-not-allowed text-base leading-none transition-colors"
+        >−</button>
+        <button
+          onClick={handleVZoomFit}
+          title={userScale === null ? 'Fit to window (already active)' : 'Fit to window'}
+          className={`w-5 h-5 flex items-center justify-center text-xs transition-colors ${userScale === null ? 'text-slate-600 cursor-default' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'}`}
+        >⊡</button>
+        <button
+          onClick={handleVZoomIn}
+          title="Zoom in (vertical) — Ctrl+scroll"
+          className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 text-base leading-none transition-colors"
+        >+</button>
+      </div>
       <div
         className="flex-1 relative overflow-x-hidden"
         style={{ overflowY: needsVScroll ? 'auto' : 'hidden' }}

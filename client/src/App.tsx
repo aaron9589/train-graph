@@ -235,8 +235,12 @@ export default function App() {
 
   async function handleSettingsSave(updated: TimetableSettings) {
     if (!selectedId) return;
-    const result = await api.updateTimetableSettings(selectedId, updated);
-    setTimetable(result);
+    try {
+      const result = await api.updateTimetableSettings(selectedId, updated);
+      setTimetable(result);
+    } catch (e) {
+      console.error('Failed to save settings:', e);
+    }
   }
 
   function recordAndSet(updated: Timetable) {
@@ -881,6 +885,7 @@ export default function App() {
               clockTime={clockTime}
               onPan={handlePan}
               externalHoveredId={hoveredCrewTrainId}
+              onScaleChange={(scale) => handleSettingsSave({ ...displayTimetable.settings, graph_scale: scale })}
             />
           )}
         </div>
