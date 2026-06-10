@@ -130,6 +130,17 @@ export const api = {
       method: 'DELETE',
     }),
 
+  setTrainStatus: (timetableId: string, trainId: string, status: 'running' | 'completed' | null) =>
+    req<Timetable>(`/timetables/${timetableId}/trains/${trainId}/complete`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  resetAllCompleted: (timetableId: string) =>
+    req<Timetable>(`/timetables/${timetableId}/trains/reset-complete`, {
+      method: 'POST',
+    }),
+
   // ── Paths ──────────────────────────────────────────────────
 
   addPath: (timetableId: string, data: Omit<PathRequest, 'id'>) =>

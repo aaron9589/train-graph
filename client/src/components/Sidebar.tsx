@@ -15,8 +15,8 @@ interface Props {
   onDeleteTimetable: (id: string) => void;
   onDuplicateTimetable: (id: string) => void;
   onSetActiveTimetable: (id: string | null) => void;
-  onAddStation: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }) => void;
-  onUpdateStation: (id: string, data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }) => void;
+  onAddStation: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean; boldName?: boolean; italicName?: boolean; underlineName?: boolean }) => void;
+  onUpdateStation: (id: string, data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean; boldName?: boolean; italicName?: boolean; underlineName?: boolean }) => void;
   onDeleteStation: (id: string) => void;
   onNewPath: () => void;
   onEditPath: (path: Path) => void;
@@ -35,6 +35,7 @@ interface Props {
   onReorderCrews: (order: string[]) => void;
   onAutoAssignCrews: (data: { crewIds: string[]; trainIds: string[]; onlyUnassigned: boolean; minBreakMins: number }) => Promise<string[]>;
   onUnassignTrain: (trainId: string) => void;
+  onToggleTrainComplete?: (trainId: string) => void;
   onCrewTrainHover?: (trainId: string | null) => void;
   distanceUnit?: 'km' | 'mi';
 }
@@ -71,6 +72,7 @@ export function Sidebar({
   onReorderCrews,
   onAutoAssignCrews,
   onUnassignTrain,
+  onToggleTrainComplete,
   onCrewTrainHover,
   distanceUnit,
 }: Props) {
@@ -546,41 +548,45 @@ export function Sidebar({
                       }}
                     >
                       {isEditing ? (
-                        <div className="p-2 flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={editingCrew.color}
-                            onChange={(e) => setEditingCrew((prev) => prev ? { ...prev, color: e.target.value } : prev)}
-                            className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent shrink-0"
-                            title="Crew colour"
-                          />
-                          <input
-                            autoFocus
-                            value={editingCrew.name}
-                            onChange={(e) => setEditingCrew((prev) => prev ? { ...prev, name: e.target.value } : prev)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && editingCrew.name.trim()) {
-                                onUpdateCrew(editingCrew.id, { name: editingCrew.name.trim(), color: editingCrew.color });
+                        <div className="p-2 flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={editingCrew.color}
+                              onChange={(e) => setEditingCrew((prev) => prev ? { ...prev, color: e.target.value } : prev)}
+                              className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent shrink-0"
+                              title="Crew colour"
+                            />
+                            <input
+                              autoFocus
+                              value={editingCrew.name}
+                              onChange={(e) => setEditingCrew((prev) => prev ? { ...prev, name: e.target.value } : prev)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && editingCrew.name.trim()) {
+                                  onUpdateCrew(editingCrew.id, { name: editingCrew.name.trim(), color: editingCrew.color });
+                                  setEditingCrew(null);
+                                }
+                                if (e.key === 'Escape') setEditingCrew(null);
+                              }}
+                              className="flex-1 min-w-0 rounded bg-slate-700 border border-slate-600 px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                if (editingCrew.name.trim()) {
+                                  onUpdateCrew(editingCrew.id, { name: editingCrew.name.trim(), color: editingCrew.color });
+                                }
                                 setEditingCrew(null);
-                              }
-                              if (e.key === 'Escape') setEditingCrew(null);
-                            }}
-                            className="flex-1 rounded bg-slate-700 border border-slate-600 px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
-                          />
-                          <button
-                            onClick={() => {
-                              if (editingCrew.name.trim()) {
-                                onUpdateCrew(editingCrew.id, { name: editingCrew.name.trim(), color: editingCrew.color });
-                              }
-                              setEditingCrew(null);
-                            }}
-                            className="text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium"
-                          >
-                            Save
-                          </button>
-                          <button onClick={() => setEditingCrew(null)} className="text-xs px-2 py-1 rounded text-slate-400 hover:bg-slate-700">
-                            ✕
-                          </button>
+                              }}
+                              className="text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium"
+                            >
+                              Save
+                            </button>
+                            <button onClick={() => setEditingCrew(null)} className="text-xs px-2 py-1 rounded text-slate-400 hover:bg-slate-700">
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <div className="group flex items-center gap-2 px-3 py-2">
@@ -629,14 +635,33 @@ export function Sidebar({
                               >
                                 <span
                                   className="w-2 h-2 rounded-full shrink-0"
-                                  style={{ background: train.color }}
+                                  style={{ background: train.status === 'completed' ? '#475569' : train.color }}
                                 />
-                                <span className={`flex-1 text-xs truncate ${hasOverlap ? 'text-red-300' : 'text-slate-400'}`}>
+                                <span className={`flex-1 text-xs truncate ${train.status === 'completed' ? 'text-slate-600 line-through' : train.status === 'running' ? 'text-green-400' : hasOverlap ? 'text-red-300' : 'text-slate-400'}`}>
                                   {train.name}
                                 </span>
-                                <span className={`text-xs tabular-nums shrink-0 ${hasOverlap ? 'text-red-400' : 'text-slate-600'} group-hover/row:hidden`}>
+                                {train.status === 'running' && (
+                                  <span className="text-xs text-green-500 shrink-0 group-hover/row:hidden">▶</span>
+                                )}
+                                {train.status === 'completed' && (
+                                  <span className="text-xs text-slate-500 shrink-0 group-hover/row:hidden">✓</span>
+                                )}
+                                <span className={`text-xs tabular-nums shrink-0 ${hasOverlap ? 'text-red-400' : 'text-slate-600'} group-hover/row:hidden ${train.status ? 'hidden' : ''}`}>
                                   {start}–{end}
                                 </span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onToggleTrainComplete?.(train.id); }}
+                                  className={`hidden group-hover/row:flex items-center justify-center w-4 h-4 rounded shrink-0 transition-colors ${
+                                    train.status === 'completed'
+                                      ? 'text-slate-500 hover:text-slate-400 hover:bg-slate-400/10'
+                                      : train.status === 'running'
+                                      ? 'text-green-500 hover:text-green-400 hover:bg-green-400/10'
+                                      : 'text-slate-500 hover:text-green-400 hover:bg-green-400/10'
+                                  }`}
+                                  title={train.status === 'running' ? 'Mark completed' : train.status === 'completed' ? 'Clear status' : 'Mark running'}
+                                >
+                                  {train.status === 'running' ? '✓' : train.status === 'completed' ? '↺' : '▶'}
+                                </button>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); onUnassignTrain(train.id); }}
                                   className="hidden group-hover/row:flex items-center justify-center w-4 h-4 rounded shrink-0 text-slate-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"

@@ -1,0 +1,704 @@
+import React, { useEffect, useRef, useState } from 'react';
+import type { Crew, Timetable, TimetableSummary, Train } from '../types';
+import { api } from '../api';
+import { useFastClock } from '../hooks/useFastClock';
+import { timeToMinutes, useLocalStorage } from '../utils';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function hexLuminance(hex: string): number {
+  let c = hex.replace('#', '').trim();
+  // Expand 3-digit (#fff) and 4-digit (#ffff) shorthand to 6 digits.
+  if (c.length === 3 || c.length === 4) c = c.split('').map((ch) => ch + ch).join('');
+  const r = parseInt(c.slice(0, 2), 16) / 255;
+  const g = parseInt(c.slice(2, 4), 16) / 255;
+  const b = parseInt(c.slice(4, 6), 16) / 255;
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return 0; // unknown → assume dark, use light text
+  const toLinear = (v: number) => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+function crewBadgeStyle(color: string, done: boolean): React.CSSProperties {
+  if (done) return { background: '#1e293b', color: '#475569', border: '1px solid #334155' };
+  const lum = hexLuminance(color);
+  return {
+    background: color,
+    color: lum > 0.35 ? '#0f172a' : '#f8fafc',
+    border: `1px solid ${color}`,
+    fontWeight: 600,
+  };
+}
+
+function trainFirstMinute(t: Train): number {
+  return t.stops.reduce((min, s) => {
+    const tm = s.departure ?? s.arrival;
+    return tm ? Math.min(min, timeToMinutes(tm)) : min;
+  }, Infinity);
+}
+
+function trainLastMinute(t: Train): number {
+  return t.stops.reduce((max, s) => {
+    const tm = s.arrival ?? s.departure;
+    return tm ? Math.max(max, timeToMinutes(tm)) : max;
+  }, -Infinity);
+}
+
+function formatMins(mins: number): string {
+  if (!isFinite(mins)) return '—';
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// ─── Sync WebSocket hook ───────────────────────────────────────────────────────
+
+function useSyncWs(
+  timetableId: string | null,
+  onCompletions: (c: Record<string, 'running' | 'completed'>) => void,
+) {
+  const cbRef = useRef(onCompletions);
+  cbRef.current = onCompletions;
+
+  useEffect(() => {
+    if (!timetableId) return;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Derive the deployment base path from the current URL so the WS works under
+    // a reverse-proxy sub-path. Strip a trailing '/mobile' and any trailing slash.
+    const basePath = window.location.pathname.replace(/\/mobile\/?$/, '').replace(/\/+$/, '');
+    const ws = new WebSocket(`${proto}//${window.location.host}${basePath}/api/live/sync?id=${timetableId}`);
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'completions' && msg.timetableId === timetableId) cbRef.current(msg.statuses ?? {});
+      } catch { /* ignore */ }
+    };
+    return () => ws.close();
+  }, [timetableId]);
+}
+
+// ─── Train card ────────────────────────────────────────────────────────────────
+
+function trainEndpoints(train: Train, stationMap: Map<string, { name: string }>): { from: string | null; to: string | null } {
+  type Entry = { stationId: string; mins: number };
+  const entries: Entry[] = [];
+  for (const stop of train.stops) {
+    const dep = stop.departure ?? stop.arrival;
+    const arr = stop.arrival ?? stop.departure;
+    if (dep) entries.push({ stationId: stop.station_id, mins: timeToMinutes(dep) });
+    else if (arr) entries.push({ stationId: stop.station_id, mins: timeToMinutes(arr) });
+  }
+  if (entries.length === 0) return { from: null, to: null };
+  entries.sort((a, b) => a.mins - b.mins);
+  const fromStop = entries[0];
+  const toStop   = entries[entries.length - 1];
+  const fromName = stationMap.get(fromStop.stationId)?.name ?? null;
+  const toName   = stationMap.get(toStop.stationId)?.name ?? null;
+  return { from: fromName, to: fromName === toName ? null : toName };
+}
+
+function TrainCard({
+  train,
+  crew,
+  stationMap,
+  onToggle,
+}: {
+  train: Train;
+  crew?: Crew;
+  stationMap: Map<string, { name: string }>;
+  onToggle: () => void;
+}) {
+  const first = trainFirstMinute(train);
+  const last = trainLastMinute(train);
+  const status = train.status;
+  const isRunning = status === 'running';
+  const isDone = status === 'completed';
+  const dotColor = isDone ? '#475569' : (crew?.color ?? train.color);
+  const { from, to } = trainEndpoints(train, stationMap);
+
+  return (
+    <div
+      className={`flex items-start gap-3 px-4 py-3 rounded-xl border transition-all ${
+        isDone
+          ? 'bg-slate-900/40 border-slate-800/50 opacity-60'
+          : isRunning
+          ? 'bg-slate-800/80 border-slate-600/80 shadow-lg'
+          : 'bg-slate-800/60 border-slate-700/50'
+      }`}
+      style={isRunning ? { boxShadow: `0 0 12px 2px ${(crew?.color ?? train.color)}33` } : undefined}
+    >
+      {/* Crew / train colour dot */}
+      <span
+        className="w-3 h-3 rounded-full shrink-0 ring-1 ring-black/20 mt-1"
+        style={{ background: dotColor }}
+      />
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`font-medium text-sm ${isDone ? 'line-through text-slate-500' : isRunning ? 'text-white' : 'text-slate-100'}`}>
+            {train.name}
+          </span>
+          {crew && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full shrink-0"
+              style={crewBadgeStyle(crew.color, isDone)}
+            >
+              {crew.name}
+            </span>
+          )}
+        </div>
+        {/* Origin → destination */}
+        {(from || to) && (
+          <div className={`mt-0.5 text-xs leading-snug ${isDone ? 'text-slate-600' : 'text-slate-400'}`}>
+            {from}{from && to && <span className="text-slate-600"> → </span>}{to}
+          </div>
+        )}
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {train.train_type && (
+            <span className="text-xs text-slate-500 bg-slate-700/50 rounded px-1.5 py-0.5">{train.train_type}</span>
+          )}
+          {train.train_id && (
+            <span className="text-xs text-slate-500 font-mono tabular-nums">{train.train_id}</span>
+          )}
+          <span className="text-xs text-slate-500 font-mono tabular-nums">
+            {formatMins(first)}–{formatMins(last)}
+          </span>
+        </div>
+        {train.notes && (
+          <p className={`text-xs mt-1 leading-snug ${isDone ? 'text-slate-600' : 'text-slate-400'}`}>
+            {train.notes}
+          </p>
+        )}
+      </div>
+
+      {/* Status cycle button */}
+      <button
+        onClick={onToggle}
+        className={`flex flex-col items-center justify-center w-14 h-14 rounded-xl shrink-0 border transition-all active:scale-95 gap-0.5 ${
+          isRunning
+            ? 'bg-green-600/20 border-green-500/60 text-green-400'
+            : isDone
+            ? 'bg-slate-700/40 border-slate-600/50 text-slate-500'
+            : 'bg-slate-700/50 border-slate-600 text-slate-500 hover:border-green-500/60 hover:text-green-400'
+        }`}
+        title={isRunning ? 'Mark completed' : isDone ? 'Clear status' : 'Mark running'}
+        aria-label={isRunning ? 'Mark completed' : isDone ? 'Clear status' : 'Mark running'}
+      >
+        {isRunning ? (
+          <>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span className="text-[9px] font-semibold uppercase tracking-wide leading-none">Done</span>
+          </>
+        ) : isDone ? (
+          <>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-4.85" />
+            </svg>
+            <span className="text-[9px] font-semibold uppercase tracking-wide leading-none">Reset</span>
+          </>
+        ) : (
+          <>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            <span className="text-[9px] font-semibold uppercase tracking-wide leading-none">Run</span>
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
+// ─── Timeline list ────────────────────────────────────────────────────────────
+
+function TimelineList({
+  trains,
+  crewMap,
+  stationMap,
+  currentMinute,
+  onToggle,
+}: {
+  trains: Train[];
+  crewMap: Map<string, Crew>;
+  stationMap: Map<string, { name: string }>;
+  currentMinute: number | null;
+  onToggle: (id: string) => void;
+}) {
+  // Compute each train's first minute once (used for dot classification + now-line interpolation)
+  const trainMeta = trains.map((t) => ({
+    id: t.id,
+    first: trainFirstMinute(t),
+    last: trainLastMinute(t),
+  }));
+
+  // Measure card midpoints relative to the bar after each render.
+  // We store positions in a ref (not state) so reading them never triggers a re-render.
+  // A single state toggle forces one extra render after measurement so the dots paint.
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const barRef   = useRef<HTMLDivElement>(null);
+  const posRef   = useRef<number[]>([]);
+  const [, setTick] = useState(0);
+
+  // Trim stale ref slots whenever the list shrinks
+  cardRefs.current.length = trains.length;
+
+  useEffect(() => {
+    if (!barRef.current) return;
+    const barTop = barRef.current.getBoundingClientRect().top;
+    const next = cardRefs.current.map((el) => {
+      if (!el) return -1;
+      const r = el.getBoundingClientRect();
+      return r.top - barTop + r.height / 2;
+    });
+    const changed = next.some((v, i) => v !== posRef.current[i]);
+    posRef.current = next;
+    if (changed) setTick((n) => n + 1);
+  // Re-measure when the train list changes (adds/removes/reorders cards).
+  // currentMinute is intentionally excluded — clock ticks must not re-measure.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trains]);
+
+  const dotPositions = posRef.current;
+
+  // Interpolate the now-line pixel position from measured dot positions + train times.
+  // Build a list of (time, px) anchor points from dots that have valid measurements,
+  // then linearly interpolate currentMinute against that scale.
+  const nowLinePx = (() => {
+    if (currentMinute === null || dotPositions.length === 0) return null;
+    const anchors = trainMeta
+      .map((m, i) => ({ mins: m.first, px: dotPositions[i] ?? -1 }))
+      .filter((a) => isFinite(a.mins) && a.px >= 0)
+      .sort((a, b) => a.mins - b.mins);
+    if (anchors.length === 0) return null;
+    if (currentMinute <= anchors[0].mins) return anchors[0].px;
+    if (currentMinute >= anchors[anchors.length - 1].mins) return anchors[anchors.length - 1].px;
+    const after  = anchors.find((a) => a.mins >= currentMinute);
+    const before = [...anchors].reverse().find((a) => a.mins <= currentMinute);
+    if (!after || !before) return null;
+    if (before.mins === after.mins) return before.px;
+    const t = (currentMinute - before.mins) / (after.mins - before.mins);
+    return before.px + t * (after.px - before.px);
+  })();
+
+  return (
+    <div className="flex gap-3">
+      {/* ── Timeline bar ── */}
+      <div ref={barRef} className="relative w-4 shrink-0 self-stretch">
+        <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-0.5 bg-slate-800 rounded-full" />
+
+        {nowLinePx !== null && (
+          <div
+            className="absolute left-0 right-0 h-0.5 bg-green-400/80 z-10"
+            style={{ top: nowLinePx }}
+          />
+        )}
+
+        {dotPositions.map((y, i) => {
+          if (y < 0 || i >= trains.length) return null;
+          const train = trains[i];
+          const meta  = trainMeta[i];
+          const crew  = train.crew_id ? crewMap.get(train.crew_id) : undefined;
+          const color = train.status === 'completed' ? '#475569' : (crew?.color ?? train.color);
+          const isPast = currentMinute !== null && isFinite(meta.last)  && meta.last  < currentMinute;
+          const isCurr = currentMinute !== null && isFinite(meta.first) && isFinite(meta.last)
+            && meta.first <= currentMinute && meta.last >= currentMinute;
+          return (
+            <div
+              key={train.id}
+              className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                top: y,
+                width:  isCurr ? 10 : 6,
+                height: isCurr ? 10 : 6,
+                background: isPast && !isCurr ? '#334155' : color,
+                boxShadow: isCurr ? `0 0 6px 2px ${color}88` : undefined,
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* ── Cards ── */}
+      <div className="flex-1 min-w-0 space-y-2">
+        {trains.map((train, i) => (
+          <div key={train.id} ref={(el) => { cardRefs.current[i] = el; }}>
+            <TrainCard
+              train={train}
+              crew={train.crew_id ? crewMap.get(train.crew_id) : undefined}
+              stationMap={stationMap}
+              onToggle={() => onToggle(train.id)}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Live clock ───────────────────────────────────────────────────────────────
+
+function useWallClock(): string {
+  const [time, setTime] = useState(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
+  useEffect(() => {
+    function tick() {
+      const now = new Date();
+      setTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    }
+    // Align to the next minute boundary then tick every 60 s
+    const msToNextMinute = (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds();
+    const initial = setTimeout(() => { tick(); }, msToNextMinute);
+    let interval: ReturnType<typeof setInterval>;
+    const startInterval = setTimeout(() => {
+      interval = setInterval(tick, 60_000);
+    }, msToNextMinute);
+    return () => { clearTimeout(initial); clearTimeout(startInterval); clearInterval(interval); };
+  }, []);
+  return time;
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export function CrewMobile() {
+  const [timetables, setTimetables] = useState<TimetableSummary[]>([]);
+  const [timetable, setTimetable] = useState<Timetable | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useLocalStorage<string[]>('mob:typeFilter', []);
+  const [crewFilter, setCrewFilter] = useLocalStorage<string[]>('mob:crewFilter', []);
+  const [typeFilterOpen, setTypeFilterOpen] = useState(false);
+  const [crewFilterOpen, setCrewFilterOpen] = useState(false);
+  const wallClock = useWallClock();
+
+  const clockSettings = timetable?.settings;
+  const { clockTime } = useFastClock(
+    clockSettings?.clock_broker_url ?? '',
+    clockSettings?.clock_topic ?? '',
+    !!(clockSettings?.clock_enabled && clockSettings?.clock_broker_url),
+  );
+
+  const displayClock = clockTime !== null
+    ? `${String(Math.floor(clockTime / 60) % 24).padStart(2, '0')}:${String(clockTime % 60).padStart(2, '0')}`
+    : wallClock;
+
+  // Determine which timetable to show: URL ?id= param, else active timetable
+  const urlId = new URLSearchParams(window.location.search).get('id') ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(urlId);
+
+  // Reset filters when switching timetables (stored crew IDs / types won't match).
+  // We compare inside the effect body (not a ref) so we only reset when the effect
+  // fires for a *new* selectedId — the cleanup of the previous effect runs before
+  // this effect fires, so there is no race with the new timetable's data.
+  const prevSelectedId = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevSelectedId.current;
+    prevSelectedId.current = selectedId;
+    if (prev !== null && prev !== selectedId) {
+      setTypeFilter([]);
+      setCrewFilter([]);
+    }
+  }, [selectedId]);
+
+  // Load timetable list then resolve active one if no explicit ID
+  useEffect(() => {
+    api.listTimetables().then((list) => {
+      setTimetables(list);
+      if (!urlId) {
+        const active = list.find((t) => t.active) ?? list[0] ?? null;
+        setSelectedId(active?.id ?? null);
+      }
+    }).catch(() => setError('Could not load timetables'));
+  }, [urlId]);
+
+  useEffect(() => {
+    if (!selectedId) { setTimetable(null); setLoading(false); return; }
+    setLoading(true);
+    api.getTimetable(selectedId)
+      .then((tt) => { setTimetable(tt); setLoading(false); })
+      .catch(() => { setError('Could not load timetable'); setLoading(false); });
+  }, [selectedId]);
+
+  // Real-time completion sync
+  useSyncWs(selectedId, (statuses) => {
+    setTimetable((prev) => {
+      if (!prev) return prev;
+      const trains = prev.trains.map((t) => ({ ...t, status: statuses[t.id] ?? undefined }));
+      return { ...prev, trains };
+    });
+  });
+
+  async function cycleStatus(trainId: string) {
+    if (!selectedId || !timetable) return;
+    const train = timetable.trains.find((t) => t.id === trainId);
+    if (!train) return;
+    const next = train.status === 'running' ? 'completed' : train.status === 'completed' ? null : 'running';
+    try {
+      const updated = await api.setTrainStatus(selectedId, trainId, next);
+      setTimetable(updated);
+    } catch { /* ignore */ }
+  }
+
+  async function resetAll() {
+    if (!selectedId) return;
+    try {
+      const updated = await api.resetAllCompleted(selectedId);
+      setTimetable(updated);
+    } catch { /* ignore */ }
+  }
+
+  // Derived: unique train types in this timetable ('' = no type set)
+  const allTypes = timetable
+    ? [
+        ...([...new Set(timetable.trains.map((t) => t.train_type ?? '').filter(Boolean))].sort()),
+        ...(timetable.trains.some((t) => !t.train_type) ? [''] : []),
+      ]
+    : [];
+
+  const crewMap = new Map((timetable?.crews ?? []).map((c) => [c.id, c]));
+  const stationMap = new Map((timetable?.stations ?? []).map((s) => [s.id, { name: s.name }]));
+
+  // Drop any stored filter values that don't exist in the current timetable
+  // (avoids blank screen when stale localStorage values don't match loaded data)
+  const validTypeFilter = typeFilter.filter((f) => allTypes.includes(f));
+  const validCrewIds = new Set((timetable?.crews ?? []).map((c) => c.id));
+  const validCrewFilter = crewFilter.filter((f) => f === '' || validCrewIds.has(f));
+
+  // Filtered + sorted trains
+  const visibleTrains = (timetable?.trains ?? []).filter((t) => {
+    if (validTypeFilter.length > 0 && !validTypeFilter.includes(t.train_type ?? '')) return false;
+    if (validCrewFilter.length > 0 && !validCrewFilter.includes(t.crew_id ?? '')) return false;
+    return true;
+  });
+
+  const sortedTrains = [...visibleTrains].sort((a, b) => {
+    const fa = trainFirstMinute(a);
+    const fb = trainFirstMinute(b);
+    if (!isFinite(fa) && !isFinite(fb)) return 0;
+    if (!isFinite(fa)) return 1;   // no-time trains sort last
+    if (!isFinite(fb)) return -1;
+    return fa - fb;
+  });
+
+  const completedCount = visibleTrains.filter((t) => t.status === 'completed').length;
+  const runningCount = visibleTrains.filter((t) => t.status === 'running').length;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-500 text-sm">Loading…</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center px-6">
+        <div className="text-red-400 text-sm text-center">{error}</div>
+      </div>
+    );
+  }
+
+  if (!timetable && timetables.length > 0) {
+    return (
+      <div className="min-h-screen bg-slate-950 px-4 pt-safe-top pb-safe-bottom">
+        <div className="max-w-lg mx-auto pt-8">
+          <h1 className="text-lg font-semibold text-white mb-4">Select Timetable</h1>
+          <div className="space-y-2">
+            {timetables.map((tt) => (
+              <button
+                key={tt.id}
+                onClick={() => setSelectedId(tt.id)}
+                className="w-full text-left px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 transition-colors"
+              >
+                <div className="font-medium">{tt.name}</div>
+                {tt.description && <div className="text-xs text-slate-500 mt-0.5">{tt.description}</div>}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      {/* ── Header ── */}
+      <header className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3">
+        <div className="max-w-lg mx-auto space-y-2">
+          {/* ── Row 1: branding + clock ── */}
+          <div className="flex items-center justify-between gap-3">
+            <a
+              href={`${window.location.pathname.replace(/\/mobile\/?$/, '').replace(/\/+$/, '') || ''}/?desktop=1`}
+              className="flex items-center gap-2 group"
+              title="Back to main app"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="#6366f1" viewBox="0 0 16 16" className="shrink-0">
+                <path d="M10.621.515C8.647.02 7.353.02 5.38.515c-.924.23-1.982.766-2.78 1.22C1.566 2.322 1 3.432 1 4.582V13.5A2.5 2.5 0 0 0 3.5 16h9a2.5 2.5 0 0 0 2.5-2.5V4.583c0-1.15-.565-2.26-1.6-2.849-.797-.453-1.855-.988-2.779-1.22ZM6.5 2h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1 0-1m-2 2h7A1.5 1.5 0 0 1 13 5.5v2A1.5 1.5 0 0 1 11.5 9h-7A1.5 1.5 0 0 1 3 7.5v-2A1.5 1.5 0 0 1 4.5 4m.5 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0m0 0a1 1 0 1 1 2 0 1 1 0 0 1-2 0m8 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0m-3-1a1 1 0 1 1 0 2 1 1 0 0 1 0-2M4 5.5a.5.5 0 0 1 .5-.5h3v3h-3a.5.5 0 0 1-.5-.5zM8.5 8V5h3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5z"/>
+              </svg>
+              <span className="text-base font-semibold text-white group-hover:text-slate-300 transition-colors">LiveRun Mobile</span>
+            </a>
+            <span
+              className="text-xl font-mono font-bold tabular-nums shrink-0"
+              style={{ color: clockTime !== null ? '#4ade80' : '#94a3b8' }}
+              title={clockTime !== null ? 'Fast clock' : 'Wall clock'}
+            >{displayClock}</span>
+          </div>
+
+          {/* ── Row 2: timetable name / selector ── */}
+          <div className="flex items-center gap-2">
+            {timetables.length > 1 ? (
+              <select
+                value={selectedId ?? ''}
+                onChange={(e) => setSelectedId(e.target.value || null)}
+                className="flex-1 min-w-0 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500"
+              >
+                {timetables.map((tt) => (
+                  <option key={tt.id} value={tt.id}>{tt.name}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="flex-1 min-w-0 text-sm text-slate-400 truncate">{timetable?.name ?? '—'}</span>
+            )}
+          </div>
+
+          {/* ── Row 3: filters + progress ── */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Train type filter */}
+            {allTypes.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => { setTypeFilterOpen((v) => !v); setCrewFilterOpen(false); }}
+                  className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                    validTypeFilter.length > 0
+                      ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Type {validTypeFilter.length > 0 ? `(${validTypeFilter.length})` : ''}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${typeFilterOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+                </button>
+                {typeFilterOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setTypeFilterOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1 z-20 bg-slate-800 border border-slate-700 rounded-xl shadow-xl py-1 min-w-[160px]">
+                      {allTypes.map((type) => (
+                        <label key={type || '__blank__'} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-700 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={validTypeFilter.includes(type)}
+                            onChange={(e) =>
+                              setTypeFilter((prev) =>
+                                e.target.checked ? [...prev, type] : prev.filter((t) => t !== type)
+                              )
+                            }
+                            className="accent-blue-500 w-4 h-4"
+                          />
+                          <span className={`text-sm ${type ? 'text-slate-200' : 'text-slate-500 italic'}`}>
+                            {type || '(blank)'}
+                          </span>
+                        </label>
+                      ))}
+                      {validTypeFilter.length > 0 && (
+                        <button
+                          onClick={() => { setTypeFilter([]); setTypeFilterOpen(false); }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-500 hover:text-slate-300 border-t border-slate-700 transition-colors"
+                        >
+                          Clear filter
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Crew filter */}
+            {(timetable?.crews ?? []).length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => { setCrewFilterOpen((v) => !v); setTypeFilterOpen(false); }}
+                  className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                    validCrewFilter.length > 0
+                      ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Crew {validCrewFilter.length > 0 ? `(${validCrewFilter.length})` : ''}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${crewFilterOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9" /></svg>
+                </button>
+                {crewFilterOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setCrewFilterOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1 z-20 bg-slate-800 border border-slate-700 rounded-xl shadow-xl py-1 min-w-[160px]">
+                      {(timetable?.crews ?? []).map((crew) => (
+                        <label key={crew.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-700 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={validCrewFilter.includes(crew.id)}
+                            onChange={(e) =>
+                              setCrewFilter((prev) =>
+                                e.target.checked ? [...prev, crew.id] : prev.filter((id) => id !== crew.id)
+                              )
+                            }
+                            className="accent-blue-500 w-4 h-4"
+                          />
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: crew.color }} />
+                          <span className="text-sm text-slate-200">{crew.name}</span>
+                        </label>
+                      ))}
+                      {validCrewFilter.length > 0 && (
+                        <button
+                          onClick={() => { setCrewFilter([]); setCrewFilterOpen(false); }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-500 hover:text-slate-300 border-t border-slate-700 transition-colors"
+                        >
+                          Clear filter
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="flex-1" />
+
+            {/* Progress + reset */}
+            <span className="text-xs text-slate-500 tabular-nums">
+              {runningCount > 0 && <span className="text-green-500 mr-1">▶{runningCount}</span>}
+              {completedCount}/{visibleTrains.length}
+            </span>
+            {(completedCount > 0 || runningCount > 0) && timetable && (
+              <button
+                onClick={resetAll}
+                className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-slate-800 border border-transparent hover:border-slate-700"
+                title="Reset all statuses"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ── Train list ── */}
+      <main className="max-w-lg mx-auto px-4 py-4 pb-safe-bottom">
+        {visibleTrains.length === 0 && (
+          <p className="text-center text-slate-600 text-sm py-12">No trains match the current filter</p>
+        )}
+
+        {sortedTrains.length > 0 && (
+          <TimelineList
+            trains={sortedTrains}
+            crewMap={crewMap}
+            stationMap={stationMap}
+            currentMinute={clockTime ?? null}
+            onToggle={cycleStatus}
+          />
+        )}
+      </main>
+    </div>
+  );
+}

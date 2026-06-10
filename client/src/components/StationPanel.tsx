@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import type { Station } from '../types';
+import { stationNameStyle } from '../utils';
 
 interface Props {
   stations: Station[];
   open?: boolean;
   onToggle?: () => void;
   distanceUnit?: 'km' | 'mi';
-  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName: string | null; pushDown: boolean; aliasEnabled: boolean }) => void;
+  onAdd: (data: { name: string; shortCode: string; distance: number | null; graphPos: number; branchName: string | null; pushDown: boolean; aliasEnabled: boolean; boldName: boolean; italicName: boolean; underlineName: boolean }) => void;
   onUpdate: (
     id: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName: string | null; pushDown: boolean; aliasEnabled: boolean }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName: string | null; pushDown: boolean; aliasEnabled: boolean; boldName: boolean; italicName: boolean; underlineName: boolean }
   ) => void;
   onDelete: (id: string) => void;
 }
@@ -21,9 +22,12 @@ interface StationFormData {
   graphPos: string;   // required Y-axis position
   branchName: string; // optional branch group name
   aliasEnabled: boolean;
+  boldName: boolean;
+  italicName: boolean;
+  underlineName: boolean;
 }
 
-const EMPTY: StationFormData = { name: '', shortCode: '', distance: '', graphPos: '', branchName: '', aliasEnabled: false };
+const EMPTY: StationFormData = { name: '', shortCode: '', distance: '', graphPos: '', branchName: '', aliasEnabled: false, boldName: false, italicName: false, underlineName: false };
 
 export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', onAdd, onUpdate, onDelete }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -50,6 +54,9 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
       graphPos: String(s.graph_pos ?? 0),
       branchName: s.branch_name ?? '',
       aliasEnabled: s.alias_enabled ?? false,
+      boldName: s.bold_name ?? false,
+      italicName: s.italic_name ?? false,
+      underlineName: s.underline_name ?? false,
     });
     setAddForm(null);
     setError('');
@@ -81,6 +88,9 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
       branchName: addForm.branchName.trim() || null,
       pushDown,
       aliasEnabled: addForm.aliasEnabled,
+      boldName: addForm.boldName,
+      italicName: addForm.italicName,
+      underlineName: addForm.underlineName,
     });
     setAddForm(null);
     setError('');
@@ -98,6 +108,9 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
       branchName: editForm.branchName.trim() || null,
       pushDown,
       aliasEnabled: editForm.aliasEnabled,
+      boldName: editForm.boldName,
+      italicName: editForm.italicName,
+      underlineName: editForm.underlineName,
     });
     setEditingId(null);
     setError('');
@@ -194,6 +207,12 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
                 />
                 Allow per-train location alias
               </label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Name style:</span>
+                <button type="button" onClick={() => setEditForm({ ...editForm, boldName: !editForm.boldName })} className={`w-6 h-6 rounded text-xs font-bold transition-colors ${editForm.boldName ? 'bg-slate-200 text-slate-900' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>B</button>
+                <button type="button" onClick={() => setEditForm({ ...editForm, italicName: !editForm.italicName })} className={`w-6 h-6 rounded text-xs italic transition-colors ${editForm.italicName ? 'bg-slate-200 text-slate-900' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>I</button>
+                <button type="button" onClick={() => setEditForm({ ...editForm, underlineName: !editForm.underlineName })} className={`w-6 h-6 rounded text-xs underline transition-colors ${editForm.underlineName ? 'bg-slate-200 text-slate-900' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>U</button>
+              </div>
               <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -232,10 +251,10 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
               onClick={() => startEdit(s)}
             >
               <div className="flex-1 min-w-0">
-                <span className="text-sm text-slate-300 truncate block">{s.name}</span>
+                <span className={`text-sm text-slate-300 truncate block${stationNameStyle(s).bold ? ' font-bold' : ''}${s.italic_name ? ' italic' : ''}${s.underline_name ? ' underline' : ''}`}>{s.name}</span>
                 <span className="text-xs text-slate-600">
                   {s.short_code ? `${s.short_code} · ` : ''}pos {s.graph_pos ?? 0}
-                  {s.distance != null ? ` · ${s.distance} ${distanceUnit ?? 'km'}` : ''}{s.branch_name ? ` · ${s.branch_name}` : ''}{s.alias_enabled ? ' · alias ✓' : ''}
+                  {s.distance != null ? ` · ${s.distance} ${distanceUnit ?? 'km'}` : ''}{s.branch_name ? ` · ${s.branch_name}` : ''}{s.alias_enabled ? ' · alias ✓' : ''}{(s.bold_name || s.italic_name || s.underline_name) ? ' · ' + [s.bold_name && 'B', s.italic_name && 'I', s.underline_name && 'U'].filter(Boolean).join('') : ''}
                 </span>
               </div>
               <button
@@ -305,6 +324,12 @@ export function StationPanel({ stations, open, onToggle, distanceUnit = 'km', on
               />
               Allow per-train location alias
             </label>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">Name style:</span>
+              <button type="button" onClick={() => setAddForm({ ...addForm, boldName: !addForm.boldName })} className={`w-6 h-6 rounded text-xs font-bold transition-colors ${addForm.boldName ? 'bg-slate-200 text-slate-900' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>B</button>
+              <button type="button" onClick={() => setAddForm({ ...addForm, italicName: !addForm.italicName })} className={`w-6 h-6 rounded text-xs italic transition-colors ${addForm.italicName ? 'bg-slate-200 text-slate-900' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>I</button>
+              <button type="button" onClick={() => setAddForm({ ...addForm, underlineName: !addForm.underlineName })} className={`w-6 h-6 rounded text-xs underline transition-colors ${addForm.underlineName ? 'bg-slate-200 text-slate-900' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>U</button>
+            </div>
             <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
               <input
                 type="checkbox"
