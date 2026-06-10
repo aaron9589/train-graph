@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Timetable, Train, TrainStop } from '../types';
-import { timeToMinutes, minutesToTime } from '../utils';
+import { timeToMinutes, minutesToTime, stationNameStyle } from '../utils';
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 const PAD = { top: 24, right: 24, bottom: 48, left: 140 };
@@ -575,7 +575,7 @@ export function TrainGraph({
                     const labelFill = branchColor ? '#788494' : '#94a3b8';
                     return (
                       <>
-                        <text x={lx} textAnchor="end" fill={labelFill} fontSize="12" fontFamily="system-ui, sans-serif">
+                        <text x={lx} textAnchor="end" fill={labelFill} fontSize="12" fontFamily="system-ui, sans-serif" fontWeight={stationNameStyle(station).bold ? 'bold' : 'normal'} fontStyle={station.italic_name ? 'italic' : 'normal'} textDecoration={station.underline_name ? 'underline' : 'none'}>
                           <tspan x={lx} y={nameY1}>{line1}</tspan>
                           {nameY2 && <tspan x={lx} y={nameY2}>{line2}</tspan>}
                         </text>
@@ -602,6 +602,10 @@ export function TrainGraph({
               if (points.length < 2) return null;
               const ptStr = points.map((p) => `${p.x},${p.y}`).join(' ');
               const isHovered = effectiveHoveredId === train.id;
+              const isRunning = train.status === 'running';
+              const isDone = train.status === 'completed';
+              const lineColor = isDone ? '#475569' : train.color;
+              const lineOpacity = 1;
               return (
                 <g
                   key={train.id}
@@ -612,10 +616,13 @@ export function TrainGraph({
                   onClick={() => onTrainClick?.(train)}
                 >
                   <polyline points={ptStr} fill="none" stroke="transparent" strokeWidth="12" />
-                  {isHovered && <polyline points={ptStr} fill="none" stroke={train.color} strokeWidth="6" strokeOpacity="0.25" />}
-                  <polyline points={ptStr} fill="none" stroke={train.color} strokeWidth={isHovered ? 2.5 : 2} strokeLinejoin="round" strokeLinecap="round" />
+                  {/* Glow layers for running trains */}
+                  {isRunning && <polyline points={ptStr} fill="none" stroke={train.color} strokeWidth="10" strokeOpacity={0.15} strokeLinejoin="round" strokeLinecap="round" />}
+                  {isRunning && <polyline points={ptStr} fill="none" stroke={train.color} strokeWidth="5" strokeOpacity={0.35} strokeLinejoin="round" strokeLinecap="round" />}
+                  {isHovered && <polyline points={ptStr} fill="none" stroke={lineColor} strokeWidth="6" strokeOpacity={0.25 * lineOpacity} />}
+                  <polyline points={ptStr} fill="none" stroke={lineColor} strokeOpacity={lineOpacity} strokeWidth={isHovered || isRunning ? 2.5 : 2} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={undefined} />
                   {points.map((p, i) => (
-                    <circle key={i} cx={p.x} cy={p.y} r="2.5" fill={train.color} />
+                    <circle key={i} cx={p.x} cy={p.y} r="2.5" fill={lineColor} opacity={lineOpacity} />
                   ))}
                 </g>
               );

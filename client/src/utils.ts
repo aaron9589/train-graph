@@ -163,6 +163,12 @@ export function exportCrewsXml(timetable: import('./types').Timetable): string {
   ].join('\n');
 }
 
+/** Resolve a station's name-style flags, defaulting to bold when none are set (legacy behavior). */
+export function stationNameStyle(s: { bold_name?: boolean; italic_name?: boolean; underline_name?: boolean }): { bold: boolean; italic: boolean; underline: boolean } {
+  const any = s.bold_name || s.italic_name || s.underline_name;
+  return { bold: !!(s.bold_name || !any), italic: !!s.italic_name, underline: !!s.underline_name };
+}
+
 /** Generate tick marks between startTime and endTime at the given interval (minutes). */
 export function generateTicks(
   startTime: string,

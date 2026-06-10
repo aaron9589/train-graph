@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { Timetable, TimetableSummary, TimetableSettings, Train, ModalState, TrainRequest, Path, PathRequest } from './types';
 import { api } from './api';
-import { useLocalStorage, timeToMinutes, exportCatsXml, exportCrewsXml, escapeHtml } from './utils';
+import { useLocalStorage, timeToMinutes, exportCatsXml, exportCrewsXml, escapeHtml, stationNameStyle } from './utils';
 import { useFastClock } from './hooks/useFastClock';
 import { Sidebar } from './components/Sidebar';
 import { TrainGraph } from './components/TrainGraph';
@@ -92,7 +92,7 @@ function buildFullTimetableHtml(timetable: Timetable): string {
             if (!stop) return `<td style="${rowBg}">&#8203;</td>`;
             let content: string;
             if (stop.arrival && stop.departure && stop.arrival !== stop.departure) {
-              content = `${escapeHtml(stop.arrival)}&#8202;/&#8202;${escapeHtml(stop.departure)}`;
+              content = `${escapeHtml(stop.arrival)} / ${escapeHtml(stop.departure)}`;
             } else {
               content = escapeHtml(stop.arrival ?? stop.departure ?? '');
             }
@@ -104,7 +104,9 @@ function buildFullTimetableHtml(timetable: Timetable): string {
         const shortCode = station.short_code
           ? ` <span style="font-weight:normal;color:#666;">${escapeHtml(station.short_code)}</span>`
           : '';
-        return `<tr><td style="${rowBg}font-weight:bold;">${escapeHtml(station.name)}${shortCode}</td>${cells}</tr>`;
+        const nameStyle = stationNameStyle(station);
+        const stationNameStyleStr = `${rowBg}${nameStyle.bold ? 'font-weight:bold;' : ''}${nameStyle.italic ? 'font-style:italic;' : ''}${nameStyle.underline ? 'text-decoration:underline;' : ''}`;
+        return `<tr><td style="${stationNameStyleStr}">${escapeHtml(station.name)}${shortCode}</td>${cells}</tr>`;
       })
       .join('');
 
@@ -233,6 +235,32 @@ export default function App() {
     clockSettings.clock_enabled
   );
 
+  // ── Sync WebSocket — keep completion state in sync across all clients ────────
+  useEffect(() => {
+    if (!selectedId) return;
+    // Build an absolute WS URL. BASE_URL is './' in production (relative),
+    // so strip both the trailing slash and any leading dot before splicing in.
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Derive the deployment base path from the current URL so the WS works under
+    // a reverse-proxy sub-path. Strip a trailing '/mobile' and any trailing slash.
+    const basePath = window.location.pathname.replace(/\/mobile\/?$/, '').replace(/\/+$/, '');
+    const ws = new WebSocket(`${proto}//${window.location.host}${basePath}/api/live/sync?id=${selectedId}`);
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'completions' && msg.timetableId === selectedId) {
+          setTimetable((prev) => {
+            if (!prev) return prev;
+            const statuses: Record<string, 'running' | 'completed'> = msg.statuses ?? {};
+            const trains = prev.trains.map((t) => ({ ...t, status: statuses[t.id] ?? undefined }));
+            return { ...prev, trains };
+          });
+        }
+      } catch { /* ignore */ }
+    };
+    return () => { ws.close(); };
+  }, [selectedId]);
+
   async function handleSettingsSave(updated: TimetableSettings) {
     if (!selectedId) return;
     try {
@@ -243,9 +271,13 @@ export default function App() {
     }
   }
 
+  function stripStatus(tt: Timetable): Timetable {
+    return { ...tt, trains: tt.trains.map((t) => { const { status: _, ...rest } = t; return rest as typeof t; }) };
+  }
+
   function recordAndSet(updated: Timetable) {
     if (timetableRef.current) {
-      setHistoryPast((prev) => [...prev.slice(-19), timetableRef.current!]);
+      setHistoryPast((prev) => [...prev.slice(-19), stripStatus(timetableRef.current!)]);
     }
     setHistoryFuture([]);
     setTimetable(updated);
@@ -358,6 +390,9 @@ export default function App() {
     branchName?: string | null;
     pushDown?: boolean;
     aliasEnabled?: boolean;
+    boldName?: boolean;
+    italicName?: boolean;
+    underlineName?: boolean;
   }) {
     if (!selectedId) return;
     const updated = await api.addStation(selectedId, data);
@@ -366,7 +401,7 @@ export default function App() {
 
   async function handleUpdateStation(
     stationId: string,
-    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean }
+    data: { name: string; shortCode: string; distance: number | null; graphPos: number; sortOrder: number; branchName?: string | null; pushDown?: boolean; aliasEnabled?: boolean; boldName?: boolean; italicName?: boolean; underlineName?: boolean }
   ) {
     if (!selectedId) return;
     const updated = await api.updateStation(selectedId, stationId, data);
@@ -479,6 +514,25 @@ export default function App() {
     recordAndSet(updated);
   }
 
+  async function handleToggleTrainComplete(trainId: string) {
+    if (!selectedId || !timetable) return;
+    const train = timetable.trains.find((t) => t.id === trainId);
+    if (!train) return;
+    const next = train.status === 'running' ? 'completed' : train.status === 'completed' ? null : 'running';
+    try {
+      const updated = await api.setTrainStatus(selectedId, trainId, next);
+      setTimetable(updated);
+    } catch { /* ignore — status toggle is best-effort */ }
+  }
+
+  async function handleResetAllCompleted() {
+    if (!selectedId) return;
+    try {
+      const updated = await api.resetAllCompleted(selectedId);
+      setTimetable(updated);
+    } catch { /* ignore — status reset is best-effort */ }
+  }
+
   // ── Undo / Redo ──────────────────────────────────────────────
 
   const handleUndo = useCallback(async () => {
@@ -486,7 +540,7 @@ export default function App() {
     const prev = historyPast[historyPast.length - 1];
     const cur = timetableRef.current;
     setHistoryPast((p) => p.slice(0, -1));
-    if (cur) setHistoryFuture((f) => [cur, ...f.slice(0, 19)]);
+    if (cur) setHistoryFuture((f) => [stripStatus(cur), ...f.slice(0, 19)]);
     setTimetable(prev);
     await api.restoreTimetable(selectedId, prev);
   }, [historyPast, selectedId]);
@@ -496,7 +550,7 @@ export default function App() {
     const next = historyFuture[0];
     const cur = timetableRef.current;
     setHistoryFuture((f) => f.slice(1));
-    if (cur) setHistoryPast((p) => [...p.slice(-19), cur]);
+    if (cur) setHistoryPast((p) => [...p.slice(-19), stripStatus(cur)]);
     setTimetable(next);
     await api.restoreTimetable(selectedId, next);
   }, [historyFuture, selectedId]);
@@ -699,6 +753,7 @@ export default function App() {
         onReorderCrews={handleReorderCrews}
         onAutoAssignCrews={handleAutoAssignCrews}
         onUnassignTrain={handleUnassignTrain}
+        onToggleTrainComplete={handleToggleTrainComplete}
         onCrewTrainHover={setHoveredCrewTrainId}
         distanceUnit={distanceUnit}
       />
@@ -768,6 +823,19 @@ export default function App() {
                       >✕</button>
                     )}
                   </div>
+                )}
+                {/* Reset completions — only shown when any train is completed */}
+                {timetable.trains.some((t) => t.status) && (
+                  <>
+                    <span className="text-slate-700 mx-1">|</span>
+                    <button
+                      onClick={handleResetAllCompleted}
+                      title="Reset all completed jobs"
+                      className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors px-1.5 py-1 rounded hover:bg-slate-800"
+                    >
+                      <span className="text-green-600">✓</span> Reset jobs
+                    </button>
+                  </>
                 )}
                 <span className="text-slate-700 mx-1">|</span>
                 {/* Print menu */}

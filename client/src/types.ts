@@ -26,6 +26,10 @@ export interface Station {
   branch_name: string | null;
   /** When true, the per-train location alias field is shown in the train editor. */
   alias_enabled?: boolean;
+  /** Name formatting flags — applied in graph labels and printouts. */
+  bold_name?: boolean;
+  italic_name?: boolean;
+  underline_name?: boolean;
 }
 
 export interface TrainStop {
@@ -55,6 +59,7 @@ export interface Train {
   train_id?: string;
   direction?: string;
   crew_id?: string;
+  status?: 'running' | 'completed';
   stops: TrainStop[];
 }
 

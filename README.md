@@ -56,6 +56,7 @@ The heart of LiveRun — an interactive stringline graph with time on the X axis
 - Group stations by **branch name** to visually separate lines in the sidebar and graph
 - **Auto-space** on insert — push-down shifts all stations below the new one down by one graph position automatically
 - **Location alias toggle** — enable per-station to let individual stops display a custom name (e.g. a platform or siding) in reports and on guard panels
+- **Name styling** — mark individual stations as bold, italic, or underlined; formatting appears on the graph labels and in printouts
 
 ### Trains
 
@@ -66,6 +67,7 @@ The heart of LiveRun — an interactive stringline graph with time on the X axis
 - **Search and filter** — type in the filter bar to instantly narrow the train list by name
 - **Terminal stop enforcement** — the first stop has no arrival field; the last stop has no departure field, matching real-world practice
 - **Location alias** — override the displayed station name for a specific stop (e.g. show a platform or siding rather than the parent station)
+- **Run tracking** — mark trains as Running (▶) or Completed (✓) during a live session; status is shown on the train list and graph, and synced in real-time across all connected browsers via WebSocket. Reset all statuses with one click.
 
 ![Train search and filter](docs/screenshots/03b-train-search-filter.png)
 

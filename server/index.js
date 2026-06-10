@@ -12,6 +12,7 @@ const openApiSpec = require('./openapi');
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const WS_STATION_FEED_PATH = '/api/live/station-feed';
+const VALID_TRAIN_STATUSES = new Set(['running', 'completed']);
 // Optional sub-path prefix, e.g. BASE_PATH=/traingraph
 // Strips the prefix from incoming URLs before any routing so the same
 // image works whether the reverse proxy rewrites the path or not.
@@ -152,6 +153,10 @@ app.post('/api/timetables/import', (req, res) => {
       graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
       sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
       branch_name: (s.branch_name && String(s.branch_name).trim()) ? String(s.branch_name).trim() : null,
+      alias_enabled: Boolean(s.alias_enabled),
+      bold_name: Boolean(s.bold_name),
+      italic_name: Boolean(s.italic_name),
+      underline_name: Boolean(s.underline_name),
     })),
     trains: (data.trains || []).map((tr) => {
       const trainId = uuidv4();
@@ -227,6 +232,7 @@ app.post('/api/timetables/:id/duplicate', (req, res) => {
       const trainId = uuidv4();
       return {
         ...tr, id: trainId, timetable_id: newId,
+        status: undefined,
         crew_id: tr.crew_id ? (crewIdMap[tr.crew_id] || null) : null,
         stops: (tr.stops || []).map((stop) => ({
           ...stop, id: uuidv4(), train_id: trainId,
@@ -264,6 +270,10 @@ app.post('/api/timetables/:id/restore', (req, res) => {
       graph_pos: Number.isFinite(Number(s.graph_pos)) ? Number(s.graph_pos) : 0,
       sort_order: Number.isFinite(Number(s.sort_order)) ? Number(s.sort_order) : 0,
       branch_name: (s.branch_name && String(s.branch_name).trim()) ? String(s.branch_name).trim() : null,
+      alias_enabled: Boolean(s.alias_enabled),
+      bold_name: Boolean(s.bold_name),
+      italic_name: Boolean(s.italic_name),
+      underline_name: Boolean(s.underline_name),
     }));
     if (Array.isArray(trains)) tt.trains = trains.map((tr) => ({
       id: String(tr.id),
@@ -275,6 +285,7 @@ app.post('/api/timetables/:id/restore', (req, res) => {
       train_id: String(tr.train_id || ''),
       direction: String(tr.direction || ''),
       crew_id: tr.crew_id ? String(tr.crew_id) : null,
+      ...(VALID_TRAIN_STATUSES.has(tr.status) ? { status: tr.status } : {}),
       stops: (tr.stops || []).map((s) => ({
         id: String(s.id),
         train_id: String(tr.id),
@@ -306,6 +317,7 @@ app.post('/api/timetables/:id/restore', (req, res) => {
     }));
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
+  broadcastCompletions(req.params.id, updated);
   res.json(normalise(updated));
 });
 
@@ -333,7 +345,7 @@ app.put('/api/timetables/:id/settings', (req, res) => {
 });
 
 app.post('/api/timetables/:id/stations', (req, res) => {
-  const { name, shortCode, distance, graphPos, branchName, pushDown, aliasEnabled } = req.body;
+  const { name, shortCode, distance, graphPos, branchName, pushDown, aliasEnabled, boldName, italicName, underlineName } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (graphPos == null || graphPos === '') return res.status(400).json({ error: 'graphPos is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
@@ -352,6 +364,9 @@ app.post('/api/timetables/:id/stations', (req, res) => {
       sort_order: maxOrder + 1,
       branch_name: (branchName && String(branchName).trim()) ? String(branchName).trim() : null,
       alias_enabled: Boolean(aliasEnabled),
+      bold_name: Boolean(boldName),
+      italic_name: Boolean(italicName),
+      underline_name: Boolean(underlineName),
     });
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -359,7 +374,7 @@ app.post('/api/timetables/:id/stations', (req, res) => {
 });
 
 app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
-  const { name, shortCode, distance, graphPos, sortOrder, branchName, pushDown, aliasEnabled } = req.body;
+  const { name, shortCode, distance, graphPos, sortOrder, branchName, pushDown, aliasEnabled, boldName, italicName, underlineName } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const updated = mutateTimetable(req.params.id, (tt) => {
     const st = tt.stations.find((s) => s.id === req.params.stationId);
@@ -384,6 +399,9 @@ app.put('/api/timetables/:id/stations/:stationId', (req, res) => {
       st.sort_order = sortOrder != null ? sortOrder : st.sort_order;
       st.branch_name = (branchName && String(branchName).trim()) ? String(branchName).trim() : null;
       st.alias_enabled = Boolean(aliasEnabled);
+      st.bold_name = Boolean(boldName);
+      st.italic_name = Boolean(italicName);
+      st.underline_name = Boolean(underlineName);
     }
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
@@ -483,6 +501,34 @@ app.delete('/api/timetables/:id/trains/:trainId', (req, res) => {
     tt.trains = tt.trains.filter((t) => t.id !== req.params.trainId);
   });
   if (!updated) return res.status(404).json({ error: 'Not found' });
+  broadcastCompletions(req.params.id, updated);
+  res.json(normalise(updated));
+});
+
+// Must be before /:trainId to avoid 'reset-complete' matching as an ID
+app.post('/api/timetables/:id/trains/reset-complete', (req, res) => {
+  const updated = mutateTimetable(req.params.id, (tt) => {
+    tt.trains.forEach((t) => { delete t.status; });
+  });
+  if (!updated) return res.status(404).json({ error: 'Not found' });
+  broadcastCompletions(req.params.id, updated);
+  res.json(normalise(updated));
+});
+
+app.patch('/api/timetables/:id/trains/:trainId/complete', (req, res) => {
+  const status = req.body?.status;
+  const updated = mutateTimetable(req.params.id, (tt) => {
+    const train = tt.trains.find((t) => t.id === req.params.trainId);
+    if (train) {
+      if (VALID_TRAIN_STATUSES.has(status)) {
+        train.status = status;
+      } else {
+        delete train.status;
+      }
+    }
+  });
+  if (!updated) return res.status(404).json({ error: 'Not found' });
+  broadcastCompletions(req.params.id, updated);
   res.json(normalise(updated));
 });
 
@@ -1256,6 +1302,53 @@ app.use((err, _req, res, _next) => {
 const server = http.createServer(app);
 const wsServer = new WebSocketServer({ noServer: true });
 
+// ── Sync WebSocket — broadcasts completion state to all connected clients ──────
+
+const WS_SYNC_PATH = '/api/live/sync';
+const wsSyncServer = new WebSocketServer({ noServer: true });
+// timetableId → Set<WebSocket>
+const syncClients = new Map();
+
+function broadcastCompletions(timetableId, tt) {
+  const clients = syncClients.get(timetableId);
+  if (!clients || clients.size === 0) return;
+  const statuses = {};
+  for (const train of (tt.trains || [])) {
+    if (train.status) statuses[train.id] = train.status;
+  }
+  const msg = JSON.stringify({ type: 'completions', timetableId, statuses });
+  for (const ws of clients) {
+    if (ws.readyState === 1) ws.send(msg);
+  }
+}
+
+wsSyncServer.on('connection', (ws, req) => {
+  const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const timetableId = String(reqUrl.searchParams.get('id') || '').trim();
+  if (!timetableId) { ws.close(1008, 'id query param required'); return; }
+
+  const tt = getTimetable(timetableId);
+  if (!tt) { ws.close(1008, 'Timetable not found'); return; }
+
+  if (!syncClients.has(timetableId)) syncClients.set(timetableId, new Set());
+  syncClients.get(timetableId).add(ws);
+
+  // Send current status state immediately on connect
+  const statuses = {};
+  for (const train of (tt.trains || [])) {
+    if (train.status) statuses[train.id] = train.status;
+  }
+  if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'completions', timetableId, statuses }));
+
+  ws.on('close', () => {
+    const clients = syncClients.get(timetableId);
+    if (clients) {
+      clients.delete(ws);
+      if (clients.size === 0) syncClients.delete(timetableId);
+    }
+  });
+});
+
 wsServer.on('connection', (ws, req) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const timetableId = String(reqUrl.searchParams.get('id') || '').trim();
@@ -1366,14 +1459,20 @@ wsServer.on('connection', (ws, req) => {
 server.on('upgrade', (req, socket, head) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const targetPath = reqUrl.pathname;
-  const basePathTarget = BASE_PATH ? `${BASE_PATH}${WS_STATION_FEED_PATH}` : null;
-  if (targetPath !== WS_STATION_FEED_PATH && targetPath !== basePathTarget) {
+  const bpFeed = BASE_PATH ? `${BASE_PATH}${WS_STATION_FEED_PATH}` : null;
+  const bpSync = BASE_PATH ? `${BASE_PATH}${WS_SYNC_PATH}` : null;
+
+  if (targetPath === WS_STATION_FEED_PATH || targetPath === bpFeed) {
+    wsServer.handleUpgrade(req, socket, head, (ws) => {
+      wsServer.emit('connection', ws, req);
+    });
+  } else if (targetPath === WS_SYNC_PATH || targetPath === bpSync) {
+    wsSyncServer.handleUpgrade(req, socket, head, (ws) => {
+      wsSyncServer.emit('connection', ws, req);
+    });
+  } else {
     socket.destroy();
-    return;
   }
-  wsServer.handleUpgrade(req, socket, head, (ws) => {
-    wsServer.emit('connection', ws, req);
-  });
 });
 
 // ── Startup migration: normalise terminal stop times ─────────────────────────
